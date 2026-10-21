@@ -36,13 +36,83 @@ CATEGORIES = [
 _session = http.Session() if hasattr(http, "Session") else http
 
 
-def fetch(url, referer=None):
+# Перегляд з-за кордону: плеєр ashdi показує «Змініть країну перегляду» для не-українських
+# адрес (саме відео при цьому доступне звідусіль). Тоді сторінку плеєра (кілька КБ) беремо
+# через безкоштовний український проксі з публічних списків — застосунок сам знаходить
+# робочий. З'єднання з плеєром — HTTPS-тунель, тож проксі вмісту не бачить і не змінює.
+# Каталог і відео йдуть напряму. GEO — чи траплялось таке блокування.
+GEO = {"blocked": False}
+GEO_TEXT = "Змініть країну перегляду"
+ABROAD = {"enabled": True, "proxy": None, "bad": set(), "checked": 0.0}
+GEO_TEST = "https://ashdi.vip/vod/296470"
+PROXY_LISTS = [
+    "https://proxylist.geonode.com/api/proxy-list?country=UA&limit=100&page=1"
+    "&sort_by=lastChecked&sort_type=desc",
+    "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&country=UA"
+    "&timeout=10000",
+]
+
+
+def _proxy_candidates():
+    found = []
+    for src in PROXY_LISTS:
+        try:
+            r = _session.get(src, timeout=15, headers=HEADERS)
+            if src.startswith("https://proxylist.geonode"):
+                found += [f"http://{p['ip']}:{p['port']}" for p in r.json().get("data", [])
+                          if set(p.get("protocols", [])) & {"http", "https"}]
+            else:
+                found += ["http://" + x for x in r.text.split() if ":" in x]
+        except Exception:
+            continue
+    return [p for p in dict.fromkeys(found) if p not in ABROAD["bad"]]
+
+
+def _proxy_works(proxy):
+    try:
+        r = _session.get(GEO_TEST, timeout=10, headers=dict(HEADERS, Referer=BASE + "/"),
+                         proxies={"http": proxy, "https": proxy}, **IMPERSONATE)
+        return r.status_code == 200 and GEO_TEXT not in r.text and "file" in r.text
+    except Exception:
+        return False
+
+
+def abroad_proxy(refresh=False):
+    """Робочий український проксі (або None). Перевіряємо кандидатів паралельно — перший,
+    що відкрив плеєр, і береться; запам'ятовується до першого збою."""
+    import concurrent.futures as cf
+    if ABROAD["proxy"] and not refresh:
+        return ABROAD["proxy"]
+    if ABROAD["proxy"]:
+        ABROAD["bad"].add(ABROAD["proxy"])
+        ABROAD["proxy"] = None
+    cands = _proxy_candidates()[:40]
+    if not cands:
+        return None
+    ex = cf.ThreadPoolExecutor(12)
+    futures = {ex.submit(_proxy_works, p): p for p in cands}
+    try:
+        for f in cf.as_completed(futures, timeout=25):
+            if f.result():
+                ABROAD["proxy"] = futures[f]
+                break
+            ABROAD["bad"].add(futures[f])
+    except Exception:
+        pass
+    ex.shutdown(wait=False, cancel_futures=True)
+    return ABROAD["proxy"]
+
+
+def fetch(url, referer=None, proxy=None):
     h = dict(HEADERS)
+    kw = dict(IMPERSONATE)
     if referer:
         h["Referer"] = referer
         p = urlparse(referer)
         h["Origin"] = f"{p.scheme}://{p.netloc}"
-    r = _session.get(url, headers=h, timeout=20, **IMPERSONATE)
+    if proxy:
+        kw["proxies"] = {"http": proxy, "https": proxy}
+    r = _session.get(url, headers=h, timeout=20, **kw)
     if r.status_code != 200:
         raise RuntimeError(f"HTTP {r.status_code}: {url}")
     return r.text
@@ -222,7 +292,44 @@ def parse_title(html, url=BASE):
     t = soup.select_one(".to-trailer[data-src]")
     if t:
         info["trailer"] = t["data-src"].replace("/embed/", "/watch?v=")
+    info["comments"] = parse_comments(soup)
     return info
+
+
+def site_meta(url):
+    """(рейтинг IMDb або None, [жанри]) зі сторінки тайтлу — для карток, коли TMDB не знає."""
+    info = parse_title(fetch(url), url)
+    try:
+        rating = float(info["imdb"].replace(",", ".")) or None
+    except ValueError:
+        rating = None
+    return rating, [g.capitalize() for g in info["genres"][:3]]
+
+
+def parse_comments(soup):
+    """Відгуки глядачів зі сторінки тайтлу: [{author, role, date, text, likes}],
+    найновіші першими (як на сайті)."""
+    out, seen = [], set()
+    for box in soup.select("[id^=comment-id-]"):
+        cid = box["id"].rsplit("-", 1)[-1]
+        item = box.select_one(".comm-item")
+        text_el = box.select_one(f"#comm-id-{cid}")
+        if cid in seen or not item or not text_el:
+            continue
+        seen.add(cid)
+        for q in text_el.select(".quote, .title_quote"):  # цитати інших — не дублюємо
+            q.decompose()
+        text = text_el.get_text("\n", strip=True)
+        if not text:
+            continue
+        spans = [sp.get_text(" ", strip=True) for sp in item.select(".comm-one > span")]
+        author = re.sub(r"^Гість\s+", "", spans[0]) if spans else ""
+        likes = item.select_one(".ratingtypeplus")
+        out.append({"author": author or "Гість", "role": spans[1] if len(spans) > 1 else "",
+                    "date": spans[2] if len(spans) > 2 else "", "text": text,
+                    "likes": int(likes.get_text(strip=True) or 0)
+                    if likes and likes.get_text(strip=True).lstrip("-").isdigit() else 0})
+    return out
 
 
 _RESOLVED = {}
@@ -418,6 +525,24 @@ def voice_name(tab, url):
     return "Українська"
 
 
+def _fetch_abroad(url, referer):
+    """Сторінка плеєра, недоступна з-за кордону, — через український проксі (дві спроби:
+    збережений, потім свіжознайдений)."""
+    if not ABROAD["enabled"]:
+        return None
+    for refresh in (False, True):
+        proxy = abroad_proxy(refresh)
+        if not proxy:
+            return None
+        try:
+            html = fetch(url, referer=referer, proxy=proxy)
+        except Exception:
+            continue
+        if GEO_TEXT not in html:
+            return html
+    return None
+
+
 def _page_streams(url, label=(), html=None):
     html = html if html is not None else fetch(url)
     # вкладки плеєрів на сторінці («Плеєр 1», «Плеєр 2 (субтитри)») — у тому ж порядку, що й iframe
@@ -428,6 +553,11 @@ def _page_streams(url, label=(), html=None):
             fhtml = fetch(fr, referer=url)
         except Exception:
             continue
+        if GEO_TEXT in fhtml:
+            GEO["blocked"] = True
+            fhtml = _fetch_abroad(fr, url)
+            if fhtml is None:
+                continue
         tab = tabs[i] if i < len(tabs) else ""
         for path, link, subs in parse_player(fhtml):
             voice = voice_name(tab, link)

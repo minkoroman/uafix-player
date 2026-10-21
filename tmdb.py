@@ -26,8 +26,11 @@ API = "https://api.themoviedb.org/3"
 IMG = "https://image.tmdb.org/t/p/"
 _session = requests.Session()
 _lock = threading.Lock()
+CACHE_V = 2  # версія кешу: 2 — пошук спершу за оригінальною назвою, з перевіркою року
 _cache = None  # url сторінки на сайті → шлях кадру в TMDB ("" — не знайдено)
 _ids = {}  # url сторінки → (kind, id) у TMDB (у тому ж файлі під ключем "__ids__")
+_meta = {}  # url сторінки → {"r": рейтинг або None, "g": [id жанрів]} ("__meta__")
+_genres = {}  # id жанру → назва українською ("__genres__")
 
 
 def enabled():
@@ -47,14 +50,19 @@ def _load():
                 _cache = json.load(f)
         except Exception:
             _cache = {}
+        if _cache.pop("__v__", 1) < CACHE_V:  # старий пошук міг знайти не той тайтл
+            _cache = {}
         _ids.update({k: tuple(v) for k, v in _cache.pop("__ids__", {}).items()})
+        _meta.update(_cache.pop("__meta__", {}))
+        _genres.update({int(k): v for k, v in _cache.pop("__genres__", {}).items()})
     return _cache
 
 
 def _save():
     try:
         with open(_cache_file(), "w", encoding="utf-8") as f:
-            json.dump(dict(_cache, __ids__=_ids), f, ensure_ascii=False)
+            json.dump(dict(_cache, __ids__=_ids, __meta__=_meta, __genres__=_genres,
+                           __v__=CACHE_V), f, ensure_ascii=False)
     except Exception:
         pass
 
@@ -73,13 +81,17 @@ def _norm(s):
 
 def _search(kind, query, year):
     """Найкращий збіг: спершу з роком, потім без нього (у серіалів рік сайту — часто рік
-    сезону). Серед результатів — той, чия назва збігається, інакше найпопулярніший."""
+    сезону). Серед результатів — той, чия назва збігається, інакше найпопулярніший.
+    Фільм з іншим роком (±1) відкидаємо: «Буря» 2026 інакше ставала «Бурею» 1988-го."""
     key_year = "primary_release_year" if kind == "movie" else "first_air_date_year"
     for params in ({key_year: year} if year else None, {}):
         if params is None:
             continue
         res = _get(f"/search/{kind}", query=query, language="uk-UA", include_adult="false",
                    **params).get("results", [])
+        if kind == "movie" and year and not params:
+            res = [r for r in res if not r.get("release_date") or
+                   abs(int(r["release_date"][:4]) - int(year)) <= 1]
         if not res:
             continue
         q = _norm(query)
@@ -88,6 +100,13 @@ def _search(kind, query, year):
                          _norm(r.get("original_title") or r.get("original_name")))]
         return (same or res)[0]
     return None
+
+
+def _queries(title, orig):
+    """Спершу оригінальна (латиницею) назва — вона однозначніша: українських «Бур» кілька."""
+    if orig and re.search(r"[A-Za-z]", orig):
+        return [q for q in (orig, title) if q]
+    return [q for q in (title, orig) if q]
 
 
 def _best_backdrop(kind, tmdb_id, fallback):
@@ -129,14 +148,14 @@ def backdrop(url, title, orig="", year="", size="w1280"):
     try:
         for kind in kinds:
             hit = None
-            for q in (title, orig):
-                if q:
-                    hit = _search(kind, q, str(year or "")[:4])
-                    if hit:
-                        break
+            for q in _queries(title, orig):
+                hit = _search(kind, q, str(year or "")[:4])
+                if hit:
+                    break
             if hit:
                 path = _best_backdrop(kind, hit["id"], hit.get("backdrop_path"))
                 _ids[url] = (kind, hit["id"])
+                _meta[url] = _meta_of(hit)
                 break
     except Exception:
         return None  # мережа/ліміт — не запам'ятовуємо, спробуємо наступного разу
@@ -144,6 +163,85 @@ def backdrop(url, title, orig="", year="", size="w1280"):
         _cache[url] = path
         _save()
     return IMG + size + path if path else None
+
+
+# ───────── рейтинг і жанри для карток ─────────
+
+def _meta_of(d):
+    """Рейтинг TMDB і жанри — з результату пошуку чи деталей."""
+    rating = round(d.get("vote_average") or 0, 1) if d.get("vote_count") else None
+    ids = d.get("genre_ids") or [g["id"] for g in d.get("genres", [])]
+    for g in d.get("genres", []):  # з деталей — одразу з назвами
+        _genres.setdefault(g["id"], g.get("name") or "")
+    return {"r": rating or None, "g": ids[:3], "v": META_V}
+
+
+META_V = 2  # версія запису: старіші (з порогом голосів) — перерахувати
+
+
+def _genre_names(ids):
+    if any(i not in _genres for i in ids):
+        for kind in ("movie", "tv"):
+            try:
+                for g in _get(f"/genre/{kind}/list", language="uk-UA").get("genres", []):
+                    _genres[g["id"]] = g.get("name") or ""
+            except Exception:
+                pass
+    return [(_genres.get(i) or "").capitalize() for i in ids if _genres.get(i)]
+
+
+def meta_cached(url):
+    """(чи відомо, {"rating", "genres"}) — без мережі."""
+    if not TMDB_TOKEN:
+        return True, None
+    with _lock:
+        _load()
+        m = _meta.get(url)
+        if m is None or m.get("v") != META_V:
+            return False, None  # ще не шукали / старий запис
+        if "names" in m:  # із сайту (TMDB не знайшов)
+            return True, {"rating": m["r"], "genres": m["names"]}
+        if any(i not in _genres for i in m["g"]):
+            return False, None
+        return True, {"rating": m["r"], "genres": [(_genres[i] or "").capitalize()
+                                                   for i in m["g"] if _genres.get(i)]}
+
+
+def meta(url, title, orig="", year="", site=None):
+    """Рейтинг і жанри тайтлу для картки. Блокує (мережа) — з потоку.
+    site(url) → (рейтинг, [жанри]) — запасне джерело (сторінка тайтлу на сайті), коли TMDB
+    тайтл не знайшов або в нього немає оцінки чи жанрів."""
+    if not TMDB_TOKEN:
+        return None
+    with _lock:
+        _load()
+        m, found = _meta.get(url), _ids.get(url)
+    if m is None or m.get("v") != META_V:
+        m = None
+        if found:  # кадр шукали раніше — лише деталі
+            m = _meta_of(_get(f"/{found[0]}/{found[1]}", language="uk-UA"))
+        else:
+            backdrop(url, title, orig, year)
+            with _lock:
+                m = _meta.get(url)
+                if m is not None and m.get("v") != META_V:
+                    m = None
+    names = _genre_names(m["g"]) if m else []
+    rating = m["r"] if m else None
+    if site and (not rating or not names):
+        try:
+            s_rating, s_genres = site(url)
+        except Exception:
+            s_rating, s_genres = None, []
+        rating = rating or s_rating
+        names = names or s_genres
+        m = {"r": rating, "g": [], "names": names, "v": META_V}
+    if m is None:
+        return None
+    with _lock:
+        _meta[url] = m
+        _save()
+    return {"rating": rating, "genres": names}
 
 
 # ───────── актори ─────────
@@ -155,14 +253,13 @@ def _find(url, title, orig, year):
         if url in _ids:
             return _ids[url]
     for kind in (("movie", "tv") if "/films/" in url else ("tv", "movie")):
-        for q in (title, orig):
-            if q:
-                hit = _search(kind, q, str(year or "")[:4])
-                if hit:
-                    with _lock:
-                        _ids[url] = (kind, hit["id"])
-                        _save()
-                    return kind, hit["id"]
+        for q in _queries(title, orig):
+            hit = _search(kind, q, str(year or "")[:4])
+            if hit:
+                with _lock:
+                    _ids[url] = (kind, hit["id"])
+                    _save()
+                return kind, hit["id"]
     return None
 
 
@@ -227,8 +324,8 @@ def collection(url, title, orig="", year=""):
     found = _find(url, title, orig, year)
     if found and found[0] != "movie" and "/serials/" not in url:
         # мультфільм / аніме: _find міг спершу знайти однойменний серіал
-        for q in (title, orig):
-            hit = q and _search("movie", q, str(year or "")[:4])
+        for q in _queries(title, orig):
+            hit = _search("movie", q, str(year or "")[:4])
             if hit:
                 found = ("movie", hit["id"])
                 break

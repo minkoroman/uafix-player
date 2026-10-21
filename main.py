@@ -120,6 +120,10 @@ MPV_STREAMING = {
                      "reconnect_delay_max=5",
 }
 
+# Android / TV: яким плеєром дивитись (налаштування «Плеєр»)
+PLAYER_OPTIONS = [("Запитувати", "ask"), ("Вбудований", "builtin"),
+                  ("Інша програма", "external")]
+
 # розмір субтитрів: (назва, множник базового розміру)
 SUB_SIZES = [("Малі", 0.75), ("Середні", 1.0), ("Великі", 1.3), ("Дуже великі", 1.6)]
 # масштаб відео: (ключ, назва, BoxFit)
@@ -340,6 +344,12 @@ def main(page: ft.Page, reopen=None):
             if b.style is None:
                 b.style = ft.ButtonStyle()
             b.style.side = TV_FOCUS_SIDE
+        # чи фокус уже у вікні (див. dialog_focus) — обробники ставимо до показу вікна
+        got = {"in": False}
+        for c in buttons + fields:
+            prev = c.on_focus
+            c.on_focus = (lambda e, prev=prev: (quiet(), got.update({"in": True}),
+                                                prev(e) if prev else None))
         page.show_dialog(dlg)  # після стилів: інакше зміни вже не дійдуть до екрана
         # поле вводу (пошук) — першим: фокус на ньому відкриває клавіатуру телевізора
         target = next((f for f in fields if f.autofocus), None) or \
@@ -347,7 +357,20 @@ def main(page: ft.Page, reopen=None):
             next((b for b in reversed(buttons) if isinstance(b, ft.FilledButton)), None) or \
             (buttons[0] if buttons else None)
         if target is not None:
-            page.run_task(focus_later, target)
+            page.run_task(dialog_focus, dlg, got, target)
+
+    async def dialog_focus(dlg, got, target):
+        """TV: фокус у щойно відкритому вікні. Вікно оновлення відкривається під час запуску —
+        тоді головна ще ставить фокус на свій перший рядок і забирала його з кнопки. Тож
+        повторюємо, доки фокус не опиниться у вікні (або вікно не закриють)."""
+        for delay in (0.35, 0.8, 1.5, 3.0):
+            await asyncio.sleep(delay if delay == 0.35 else delay - 0.35)
+            if got["in"] or not dlg.open:
+                return
+            try:
+                await target.focus()
+            except Exception:
+                return
 
     def tv_tap(ctrl, action, highlight=None, radius=12, autofocus=False, focus_bg=None):
         """На ПК повертає контейнер як є; на телевізорі — обгортає його у фокусовану кнопку
@@ -413,6 +436,14 @@ def main(page: ft.Page, reopen=None):
                 "sub_orig": "", "sub_ua": "",
                 # пропускати заставку UAFLIX (16 с на початку відео з «uaflix» у назві файлу)
                 "skip_intro": True,
+                "card_meta": True,  # рейтинг і жанри (TMDB) на картках тайтлів
+                # декодування відео: "auto" — апаратне, "copy" — апаратне сумісне,
+                # "off" — програмне (якщо на телевізорі картинка тремтить / відстає від звуку)
+                "hwdec": "auto",
+                "abroad": True,  # з-за кордону — плеєр через безкоштовний український проксі
+                # Android / TV: "ask" — запитати при першому перегляді, "builtin" — свій плеєр,
+                # "external" — інша програма (VLC, MX Player…)
+                "player": "ask",
                 "app_icon": "classic"}  # іконка застосунку (appicon.py)
 
     # Історія переглядів: [{url, title, orig, poster, age, season, label, si, ei, voice,
@@ -466,6 +497,7 @@ def main(page: ft.Page, reopen=None):
             if settings["layout"] not in ("grid", "list"):
                 settings["layout"] = "list" if TV else "grid"
             apply_layout_default()
+            core.ABROAD["enabled"] = bool(settings.get("abroad", True))
         except Exception:
             pass
         render_continue()
@@ -1891,6 +1923,38 @@ def main(page: ft.Page, reopen=None):
         page.run_task(look)
         return box
 
+    def card_meta(item, show):
+        """Рейтинг і жанри (TMDB) для картки: show(rating, genres) — одразу, якщо вже
+        відомо, інакше після відповіді TMDB. Вимкнено в налаштуваннях — нічого."""
+        if not settings.get("card_meta") or not tmdb.enabled() or not item.get("url"):
+            return
+        known, m = tmdb.meta_cached(item["url"])
+        if known:
+            if m and (m["rating"] or m["genres"]):
+                show(m["rating"], m["genres"])
+            return
+
+        async def look():
+            try:
+                async with tmdb_slots:
+                    m = await asyncio.wait_for(asyncio.to_thread(
+                        tmdb.meta, item["url"], item.get("title", ""), item.get("orig", ""),
+                        item.get("year", ""), core.site_meta), 12)
+            except Exception:
+                return
+            if m and (m["rating"] or m["genres"]):
+                show(m["rating"], m["genres"], True)
+
+        page.run_task(look)
+
+    def rating_badge(rating):
+        return ft.Container(
+            ft.Row([ft.Icon(ft.Icons.STAR_ROUNDED, size=12, color="#F5C518"),
+                    ft.Text(f"{rating:.1f}", size=11, weight=ft.FontWeight.W_700,
+                            color="#FFFFFF")], spacing=3, tight=True),
+            padding=ft.Padding.symmetric(horizontal=7, vertical=3), border_radius=6,
+            bgcolor=ft.Colors.with_opacity(0.6, "#000000"), border=ft.Border.all(1, "#22FFFFFF"))
+
     def grid_card(item, progress=None, caption=None, on_open=None, on_remove=None, tv_w=None):
         play = ft.Container(
             ft.Icon(ft.Icons.PLAY_ARROW_ROUNDED, color="#FFFFFF", size=30),
@@ -1912,19 +1976,36 @@ def main(page: ft.Page, reopen=None):
                 ft.Column([
                     ft.Text(item["title"], size=15, weight=ft.FontWeight.W_700, color="#FFFFFF",
                             max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
-                    ft.Text(caption or item["orig"] or " ", size=11,
-                            color=ui.ACCENT_2 if caption else "#C8CCD4", max_lines=1,
-                            overflow=ft.TextOverflow.ELLIPSIS),
+                    sub_text := ft.Text(caption or item["orig"] or " ", size=11,
+                                        color=ui.ACCENT_2 if caption else "#C8CCD4", max_lines=1,
+                                        overflow=ft.TextOverflow.ELLIPSIS),
                 ], spacing=2, tight=True),
                 left=12, right=12, bottom=16 if progress is not None else 12,
             ),
             ft.Container(play, left=0, right=0, top=0, bottom=0, alignment=ft.Alignment.CENTER),
+            # праворуч угорі; поруч із ✕ «Прибрати» (якщо є) — лівіше, щоб не перекривались
+            rating_slot := ft.Container(right=46 if on_remove and not TV else 10, top=10,
+                                        visible=False),
         ]
+
+        def show_meta(rating, genres, late=False):
+            if rating:
+                rating_slot.content, rating_slot.visible = rating_badge(rating), True
+            if genres and not caption:  # жанри — замість оригінальної назви
+                sub_text.value = " · ".join(genres[:2])
+            if late:
+                try:
+                    rating_slot.update()
+                    sub_text.update()
+                except Exception:
+                    pass
+
+        card_meta(item, show_meta)
+        refs = {"caption": sub_text} if caption else {}  # див. update_continue_in_place
         if progress is not None:  # смужка «скільки переглянуто»
-            layers.append(ft.Container(
-                ft.ProgressBar(value=max(0.02, min(progress, 1)), color=ACCENT,
-                               bgcolor="#55FFFFFF", bar_height=4, border_radius=2),
-                left=12, right=12, bottom=8))
+            refs["progress"] = ft.ProgressBar(value=max(0.02, min(progress, 1)), color=ACCENT,
+                                              bgcolor="#55FFFFFF", bar_height=4, border_radius=2)
+            layers.append(ft.Container(refs["progress"], left=12, right=12, bottom=8))
         if item["age"]:
             layers.append(ft.Container(
                 ft.Text(item["age"], size=10, weight=ft.FontWeight.W_700, color="#FFFFFF"),
@@ -1984,10 +2065,13 @@ def main(page: ft.Page, reopen=None):
                 outer.border = ft.Border.all(3, focus_ring if f else ft.Colors.TRANSPARENT)
                 outer.update()
 
-            return ui.appear(focusable(
+            btn = ui.appear(focusable(
                 outer, lambda e: on_open() if on_open else page.run_task(open_title, item),
                 on_focus_change=ring, radius=20))
+            btn.refs = refs
+            return btn
         card.on_hover = lambda e: highlight(ui.hovered(e))
+        card.refs = refs
         return ui.appear(card)
 
     def list_card(item, caption=None, on_open=None, progress=None, autofocus=False):
@@ -1998,13 +2082,30 @@ def main(page: ft.Page, reopen=None):
         if item["orig"]:
             lines.append(ft.Text(item["orig"], size=13, color=MUTED, max_lines=1,
                                  overflow=ft.TextOverflow.ELLIPSIS))
+        meta_line = ft.Text("", size=13, color=MUTED, max_lines=1, visible=False,
+                            overflow=ft.TextOverflow.ELLIPSIS)
+        lines.append(meta_line)
+
+        def show_meta(rating, genres, late=False):
+            parts = ([f"★ {rating:.1f}"] if rating else []) + genres[:3]
+            meta_line.value, meta_line.visible = " · ".join(parts), bool(parts)
+            if late:
+                try:
+                    meta_line.update()
+                except Exception:
+                    pass
+
+        card_meta(item, show_meta)
         if item["age"] and not caption:
             lines.append(ft.Row([ui.pill(item["age"])]))
+        refs = {}  # підпис і смужка — щоб оновити на місці (див. render_continue)
         if caption:
-            lines.append(ft.Text(caption, size=13, color=ACCENT, max_lines=1))
+            refs["caption"] = ft.Text(caption, size=13, color=ACCENT, max_lines=1)
+            lines.append(refs["caption"])
         if progress:
-            lines.append(ft.ProgressBar(value=progress, color=ACCENT, bgcolor=SURFACE_3,
-                                        bar_height=4, border_radius=2, width=220))
+            refs["progress"] = ft.ProgressBar(value=progress, color=ACCENT, bgcolor=SURFACE_3,
+                                              bar_height=4, border_radius=2, width=220)
+            lines.append(refs["progress"])
         arrow = ft.Icon(ft.Icons.CHEVRON_RIGHT_ROUNDED, color=None if TV else MUTED,
                         offset=ft.Offset(0, 0), animate_offset=ui.FAST)
         row = ft.Container(
@@ -2029,6 +2130,7 @@ def main(page: ft.Page, reopen=None):
 
             btn = tv_tap(row, open_tv, highlight=top, radius=14, autofocus=autofocus,
                          focus_bg=(TV_FOCUS_BG, SURFACE))
+            btn.refs = refs
             return btn
 
         def hover(e):
@@ -2630,9 +2732,43 @@ def main(page: ft.Page, reopen=None):
         if TV else continue_row,
     ], spacing=0, visible=False)
 
+    def update_continue_in_place(items, cards):
+        """Той самий список (ті самі тайтли в тому ж порядку) — лише новий підпис і смужка.
+        Повна перебудова після кожного «Назад» помітно перемальовувала головну."""
+        changed = []
+        for h, card in zip(items, cards):
+            refs = getattr(card, "refs", None)
+            if refs is None:
+                return False
+            cap, bar = refs.get("caption"), refs.get("progress")
+            new_cap = resume_caption(h)
+            new_val = h["pos"] / h["dur"] if h.get("dur") else None
+            if (cap is None) != (not new_cap) or (bar is None) != (not new_val):
+                return False  # з'явився / зник рядок — простіше перебудувати
+            if cap is not None and cap.value != new_cap:
+                cap.value = new_cap
+                changed.append(cap)
+            if bar is not None and abs((bar.value or 0) - new_val) > 0.001:
+                bar.value = max(0.02, min(new_val, 1)) if not TV else new_val
+                changed.append(bar)
+        for c in changed:
+            try:
+                c.update()
+            except Exception:
+                pass
+        return True
+
     def render_continue(focus=True):
         items = [h for h in history if not h.get("removed") and not watched(h)][:15]
         continue_section.visible = bool(items)
+        urls = [h["url"] for h in items[:6 if TV else 15]]
+        if urls and urls == st.get("continue_urls") and \
+                update_continue_in_place(items, st.get("continue_cards") or []):
+            if TV and focus and st.get("continue_cards") and len(page.views) <= 1 \
+                    and st["mode"][0] == "home":
+                page.run_task(focus_later, st["continue_cards"][0])
+            return
+        st["continue_urls"] = urls
         if TV:
             cards = [
                 list_card({k: h.get(k, "") for k in ("url", "title", "orig", "poster", "age")},
@@ -2643,6 +2779,7 @@ def main(page: ft.Page, reopen=None):
                               open_title, {k: h.get(k, "") for k in
                                            ("url", "title", "orig", "poster", "age")}))
                 for i, h in enumerate(items[:6])]
+            st["continue_cards"] = cards
             for c in cards:
                 c.expand = True
             # праворуч від кожного рядка — «Прибрати» (пультом: стрілка вправо → OK)
@@ -2682,6 +2819,8 @@ def main(page: ft.Page, reopen=None):
             ui.reveal(c)
             cards.append(ft.Container(c, width=shelf_card_w, data=item["url"],
                                       animate=ui.MED, animate_opacity=ui.FAST))
+            cards[-1].refs = c.refs
+        st["continue_cards"] = cards
         continue_row.controls = cards
         try:
             continue_section.update()
@@ -3132,7 +3271,8 @@ def main(page: ft.Page, reopen=None):
                                 size=15, weight=ft.FontWeight.W_600)  # колір — від рядка
                 title = {"sub_scale": "Розмір субтитрів", "quality": "Якість відео",
                          "fit": "Масштаб на весь екран", "volume_boost": "Гучність",
-                         "layout": "Вигляд розділів"}.get(key, "")
+                         "layout": "Вигляд розділів", "hwdec": "Декодування відео",
+                         "player": "Плеєр"}.get(key, "")
 
                 def on_pick(value):
                     save_setting(key, float(value) if key == "sub_scale" else value)
@@ -3150,7 +3290,12 @@ def main(page: ft.Page, reopen=None):
                          for n, v in options],
                 menu_style=ui.menu_style(), on_select=select)
 
-        def switch(key):
+        def switch(key, on_set=None):
+            def store(value):
+                save_setting(key, value)
+                if on_set:
+                    on_set(value)
+
             if TV:
                 # на телевізорі — текст «Увімкнено / Вимкнено», а не оранжевий перемикач:
                 # оранжевим має бути лише рядок, на якому зараз курсор пульта
@@ -3162,7 +3307,7 @@ def main(page: ft.Page, reopen=None):
                     label.color = None if on else MUTED  # увімкнено — колір від рядка
 
                 def toggle(e):
-                    save_setting(key, not bool(settings[key]))
+                    store(not bool(settings[key]))
                     look()
                     label.update()
 
@@ -3173,7 +3318,7 @@ def main(page: ft.Page, reopen=None):
                 look()
                 return label
             return ft.Switch(value=bool(settings[key]), active_color=ACCENT,
-                             on_change=lambda e: save_setting(key, e.control.value))
+                             on_change=lambda e: store(e.control.value))
 
         history_info = ft.Text(color=MUTED, size=12)
 
@@ -3205,7 +3350,9 @@ def main(page: ft.Page, reopen=None):
             for key, value in (("sub_scale", 1.0), ("fit", "auto"), ("quality", "1080"),
                                ("auto_fullscreen", True), ("volume_boost", "6"),
                                ("auto_updates", True),
-                               ("keep_history", True), ("skipped_version", "")):
+                               ("keep_history", True), ("skipped_version", ""),
+                               ("card_meta", True), ("hwdec", "auto"), ("player", "ask"),
+                               ("abroad", True)):
                 save_setting(key, value)
             for key, value in appearance.DEFAULTS.items():
                 appearance.save(key, value)
@@ -3439,6 +3586,16 @@ def main(page: ft.Page, reopen=None):
                 row(ft.Icons.ASPECT_RATIO_ROUNDED, "Масштаб на весь екран",
                     "Авто: на телефоні — заповнити, на комп'ютері — вписати",
                     trailing=choice("fit", fit_options)),
+                *([row(ft.Icons.SMART_DISPLAY_OUTLINED, "Плеєр",
+                       "Інша програма: VLC, MX Player… (вибір під час запуску). Прогрес "
+                       "перегляду тоді не запам'ятовується",
+                       trailing=choice("player", PLAYER_OPTIONS))]
+                  if is_android or TV else []),
+                row(ft.Icons.MEMORY_ROUNDED, "Декодування відео",
+                    "Якщо картинка тремтить чи звук випереджає відео — спробуйте «Сумісне» "
+                    "або якість 720p (діє з наступного запуску відео)",
+                    trailing=choice("hwdec", [("Апаратне", "auto"), ("Сумісне", "copy"),
+                                              ("Програмне", "off")])),
                 row(ft.Icons.FAST_FORWARD_ROUNDED, "Пропускати заставку UAFLIX",
                     "Відео починається одразу з фільму чи серії (заставка — 16 с)",
                     trailing=switch("skip_intro")),
@@ -3493,6 +3650,13 @@ def main(page: ft.Page, reopen=None):
                 row(ft.Icons.GRID_VIEW_ROUNDED, "Вигляд розділів", "Картки чи список",
                     trailing=choice("layout", [("Картки", "grid"), ("Список", "list")],
                                     on_set=apply_layout_default)),
+                row(ft.Icons.STAR_OUTLINE_ROUNDED, "Рейтинг і жанр на картках",
+                    "Оцінка й жанри з TMDB — одразу в списках, без відкриття фільму",
+                    trailing=switch("card_meta")),
+                row(ft.Icons.PUBLIC_ROUNDED, "Перегляд з-за кордону",
+                    "Якщо плеєр недоступний у вашій країні — застосунок сам відкриє його через "
+                    "український сервер (лише плеєр, відео — напряму)",
+                    trailing=switch("abroad", on_set=lambda v: core.ABROAD.update(enabled=v))),
                 *([icon_row(row)] if icon_where() else []),
             ]), section("", [
                 row(icon, title, subtitle,
@@ -3688,6 +3852,50 @@ def main(page: ft.Page, reopen=None):
             section.update()
         except Exception:
             pass
+
+    def show_reviews(comments, title, box, section, limit=4):
+        """Відгуки з сайту: спершу найпопулярніші (за «вподобайками»), решта — за кнопкою."""
+        if not comments:
+            return
+        ranked = sorted(comments, key=lambda c: -c["likes"])
+        title.value = f"Відгуки глядачів · {len(comments)}"
+
+        def card(c):
+            staff = "адмін" in c["role"].lower()
+            head = ft.Row([
+                ft.Container(ft.Text((c["author"][:1] or "?").upper(), size=14,
+                                     weight=ft.FontWeight.W_800, color="#FFFFFF"),
+                             width=32, height=32, border_radius=16,
+                             bgcolor=ACCENT if staff else SURFACE_3,
+                             alignment=ft.Alignment.CENTER),
+                ft.Column([ft.Text(c["author"] + (" · сайт" if staff else ""), size=13,
+                                   weight=ft.FontWeight.W_700, color=TEXT),
+                           ft.Text(c["date"], size=11, color=MUTED)], spacing=0, tight=True,
+                          expand=True),
+                *([ft.Row([ft.Icon(ft.Icons.THUMB_UP_ALT_ROUNDED, size=14, color=MUTED),
+                           ft.Text(str(c["likes"]), size=12, color=MUTED)], spacing=4,
+                          tight=True)] if c["likes"] else []),
+            ], spacing=10)
+            body = ft.Container(
+                ft.Column([head, ft.Text(c["text"], size=14, color=TEXT, selectable=not TV)],
+                          spacing=8, tight=True),
+                padding=14, border_radius=14, bgcolor=SURFACE, border=ft.Border.all(1, BORDER))
+            # TV: до відгуків пульт «доходить», лише якщо вони фокусуються
+            return focusable(body, lambda e: None, radius=14) if TV else body
+
+        def fill(n):
+            box.controls = [card(c) for c in ranked[:n]]
+            if len(ranked) > n:
+                more = ft.TextButton(f"Показати всі ({len(ranked)})",
+                                     style=ft.ButtonStyle(color=ACCENT,
+                                                          side=TV_FOCUS_SIDE if TV else None),
+                                     on_click=lambda e: (quiet(), fill(len(ranked)),
+                                                         box.update()))
+                box.controls.append(more)
+
+        fill(limit)
+        section.visible = True
+        ui.reveal(section)
 
     def saga_card(num, p, site, current):
         """Частина франшизи: номер, постер, назва, рік. Немає на сайті — притушена."""
@@ -3979,11 +4187,19 @@ def main(page: ft.Page, reopen=None):
             saga_row,
         ], spacing=6, visible=False))
 
+        # ── відгуки глядачів (коментарі з сайту)
+        reviews_title = ft.Text("Відгуки глядачів", size=22, weight=ft.FontWeight.W_800,
+                                color=TEXT)
+        reviews_list = ft.Column([], spacing=10)
+        reviews_section = ui.appear(ft.Column([reviews_title, ft.Container(height=2),
+                                               reviews_list], spacing=6, visible=False))
+
         if not is_mobile:  # під постером (на телефоні — внизу сторінки, після опису)
             poster_col.controls.append(ft.Container(saga_section, padding=ft.Padding.only(top=28)))
         content = ft.Container(
             ft.Column([hero, ft.Container(height=24), episodes_section,
-                       *([ft.Container(height=24), saga_section] if is_mobile else [])],
+                       *([ft.Container(height=24), saga_section] if is_mobile else []),
+                       ft.Container(height=24), reviews_section],
                       spacing=0),
             padding=ft.Padding.only(left=side_pad, right=side_pad, top=8 if is_mobile else 16,
                                     bottom=60),
@@ -4068,6 +4284,7 @@ def main(page: ft.Page, reopen=None):
             cast.visible = True
         page.run_task(load_cast, item, info, cast, cast_row)
         page.run_task(load_saga, item, info, saga_title, saga_row, saga_section)
+        show_reviews(info.get("comments") or [], reviews_title, reviews_list, reviews_section)
         if info["trailer"]:
             trailer_btn.visible = True
             trailer_btn.on_click = lambda e: page.run_task(ft.UrlLauncher().launch_url, info["trailer"])
@@ -4097,8 +4314,15 @@ def main(page: ft.Page, reopen=None):
         if not seasons:
             play_btn.content = "Відео не знайдено"
             ep_status.value = (await explain(err, "серії")) if err else ""
-            episodes_box.content = empty_state(ft.Icons.VIDEOCAM_OFF_ROUNDED, "Потоків не знайдено",
-                                               "Можливо, відео ще не додано на сайт")
+            if core.GEO["blocked"]:  # плеєр сайту не пускає з-за кордону
+                episodes_box.content = empty_state(
+                    ft.Icons.PUBLIC_OFF_ROUNDED, "Недоступно у вашій країні",
+                    "Цей плеєр працює лише в Україні, а український сервер для нього зараз не "
+                    "знайшовся. Спробуйте трохи пізніше або увімкніть VPN з українським сервером")
+            else:
+                episodes_box.content = empty_state(ft.Icons.VIDEOCAM_OFF_ROUNDED,
+                                                   "Потоків не знайдено",
+                                                   "Можливо, відео ще не додано на сайт")
             episodes_section.visible = True
             view.update()
             return
@@ -4315,6 +4539,58 @@ def main(page: ft.Page, reopen=None):
         return row
 
     # ═════════════════════ плеєр ═════════════════════
+    async def ask_player():
+        """Android / TV, перший перегляд: яким плеєром дивитись. Вибір запам'ятовується;
+        змінити — Налаштування → Відтворення → Плеєр. → "builtin" / "external" / None."""
+        done = asyncio.get_running_loop().create_future()
+
+        def pick(value):
+            def handler(e):
+                quiet()
+                save_setting("player", value)
+                page.pop_dialog()
+                if not done.done():
+                    done.set_result(value)
+            return handler
+
+        def dismissed(e):
+            quiet()
+            if not done.done():
+                done.set_result(None)
+
+        show_dialog(ft.AlertDialog(
+            title=ft.Text("Яким плеєром дивитись?", weight=ft.FontWeight.W_800),
+            bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
+            on_dismiss=dismissed,
+            content=ft.Column([
+                ft.Text("Вбудований — запам'ятовує, де ви зупинились, пропускає заставку, "
+                        "вмикає наступну серію. Інша програма — VLC, MX Player чи інший плеєр "
+                        "на пристрої.", size=14, color=TEXT, width=dialog_width()),
+                ft.Text("Вибір можна змінити: Налаштування → Відтворення → Плеєр.", size=13,
+                        color=MUTED, width=dialog_width()),
+            ], tight=True, spacing=12),
+            actions=[ft.TextButton("Інша програма", on_click=pick("external"),
+                                   style=ft.ButtonStyle(color=TEXT)),
+                     ft.FilledButton("Вбудований", on_click=pick("builtin"), autofocus=True,
+                                     style=ft.ButtonStyle(bgcolor=ACCENT, color="#FFFFFF"))],
+        ))
+        return await done
+
+    async def play_external(ctx, ep):
+        """Android / TV, «Плеєр: інша програма»: потік обраної якості — у VLC / MX Player…
+        (вікно вибору програми показує MainActivity)"""
+        entry = pick_source(ep, ctx.get("voice", ""))
+        try:
+            url = await asyncio.to_thread(core.quality_url, entry["url"], settings["quality"])
+        except Exception:
+            url = entry["url"]
+        show = (ctx["info"] or {}).get("title") or ctx["item"]["title"]
+        title = show + (f" · {ep['label']}" if len(ctx["seasons"]) > 1 or
+                        len(ctx["seasons"][0]["episodes"]) > 1 else "")
+        await ft.UrlLauncher().launch_url(
+            "uafixupdate://external?" + urlencode({"url": url, "title": title}),
+            mode=ft.LaunchMode.EXTERNAL_APPLICATION)
+
     async def play_episode(ctx, si, ei, start_ms=None):
         if not ctx["seasons"]:
             toast("Серії ще завантажуються…", ft.Icons.HOURGLASS_TOP_ROUNDED)
@@ -4329,10 +4605,21 @@ def main(page: ft.Page, reopen=None):
             toast(msg, error_icon(msg), retry=lambda: page.run_task(play_episode, ctx, si, ei))
             return
         if not sources:
-            toast("Для цієї серії відео не знайдено", ft.Icons.VIDEOCAM_OFF_ROUNDED)
+            toast("Плеєр недоступний у вашій країні — увімкніть VPN з українським сервером"
+                  if core.GEO["blocked"] else "Для цієї серії відео не знайдено",
+                  ft.Icons.VIDEOCAM_OFF_ROUNDED)
             return
         if ctx["voices"] != all_voices(ctx["seasons"]):
             await detect_voices(ctx)
+        if is_android or TV:
+            mode = settings.get("player") or "ask"
+            if mode == "ask":
+                mode = await ask_player()
+                if mode is None:
+                    return  # вікно закрили — нічого не запускаємо
+            if mode == "external":
+                await play_external(ctx, ep)
+                return
         multi = len(ctx["seasons"]) > 1
         # усі серії по порядку; черга — з обраної й далі, «before» — попередні
         everything, start = [], 0
@@ -4461,6 +4748,15 @@ def main(page: ft.Page, reopen=None):
                 props.update({"log-file": os.environ["UAFIX_MPV_LOG"], "msg-level": "all=v"})
             return props
 
+        def video_config():
+            mode = settings.get("hwdec") or "auto"
+            kw = {}
+            if mode == "off":
+                kw["enable_hardware_acceleration"] = False
+            elif mode == "copy":  # кадри копіюються з декодера — повільніше, але сумісніше
+                kw["hardware_decoding_api"] = "mediacodec-copy" if is_android else "auto-copy"
+            return fv.VideoConfiguration(mpv_properties=mpv_properties(), **kw)
+
         def media(e):
             return fv.VideoMedia(core.quality_url(e["url"], p["quality"]),
                                  http_headers=core.stream_headers(e))
@@ -4475,7 +4771,7 @@ def main(page: ft.Page, reopen=None):
             subtitle_track=track(subtitle_for(entries[0])),
             subtitle_configuration=sub_config(),
             fit=fit_value(),
-            configuration=fv.VideoConfiguration(mpv_properties=mpv_properties()),
+            configuration=video_config(),
         )
 
         async def on_error(e):

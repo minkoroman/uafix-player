@@ -93,6 +93,24 @@ class MainActivity : FlutterFragmentActivity() {
         return b.build()
     }
 
+    private fun openExternal(url: String?, title: String?) {
+        if (url == null || !(url.startsWith("https://") || url.startsWith("http://"))) return
+        val view = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(Uri.parse(url), "application/x-mpegURL")
+            putExtra("title", title ?: "")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            startActivity(Intent.createChooser(view, title ?: "Відкрити в плеєрі")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            try {  // без вікна вибору (на деяких телевізорах його немає)
+                startActivity(Intent(view).setDataAndType(Uri.parse(url), "video/*"))
+            } catch (e2: Exception) {
+            }
+        }
+    }
+
     private fun setPip(on: Boolean) {
         pipAllowed = on && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
@@ -175,6 +193,10 @@ class MainActivity : FlutterFragmentActivity() {
         }
         if (data.host == "icon") {  // вибір іконки в налаштуваннях
             setIcon(data.getQueryParameter("name") ?: "classic")
+            return true
+        }
+        if (data.host == "external") {  // «Плеєр: інша програма» — вибір плеєра (VLC, MX…)
+            openExternal(data.getQueryParameter("url"), data.getQueryParameter("title"))
             return true
         }
         // update.apk кладе Python-частина в кеш (запасні варіанти — дані застосунку)
