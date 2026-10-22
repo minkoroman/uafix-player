@@ -98,13 +98,46 @@ function merge(server, client) {
   return { history, favorites, history_cleared: cleared };
 }
 
+// D1 інколи відповідає тимчасовою помилкою («Network connection lost», «overloaded») —
+// одна повторна спроба з паузою
+async function retry(fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    await new Promise((r) => setTimeout(r, 250));
+    return await fn();
+  }
+}
+
 async function load(env, code) {
-  const row = await env.DB.prepare("SELECT data FROM sync WHERE code = ?").bind(code).first();
+  const row = await retry(() =>
+    env.DB.prepare("SELECT data FROM sync WHERE code = ?").bind(code).first());
   return row ? JSON.parse(row.data) : { history: [], favorites: [], history_cleared: 0 };
+}
+
+// останні помилки — для діагностики (без кодів і даних користувачів)
+async function logError(env, request, e) {
+  try {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS errors (at INTEGER, method TEXT, msg TEXT)").run();
+    await env.DB.prepare("INSERT INTO errors (at, method, msg) VALUES (?1, ?2, ?3)")
+      .bind(Date.now(), request.method, String((e && e.stack) || e).slice(0, 800)).run();
+    await env.DB.prepare("DELETE FROM errors WHERE at < ?1").bind(Date.now() - 7 * 86400000).run();
+  } catch {}
 }
 
 export default {
   async fetch(request, env) {
+    try {
+      return await handle(request, env);
+    } catch (e) {
+      await logError(env, request, e);
+      return json({ error: "server error" }, 503);
+    }
+  },
+};
+
+async function handle(request, env) {
+  {
     const url = new URL(request.url);
     const m = url.pathname.match(/^\/v1\/sync\/([^/]+)$/);
     if (!m) return json({ error: "not found" }, 404);
@@ -127,12 +160,12 @@ export default {
       const merged = merge(await load(env, code), client || {});
       const data = JSON.stringify(merged);
       if (data.length > MAX_BODY) return json({ error: "too large" }, 413);
-      await env.DB.prepare(
+      await retry(() => env.DB.prepare(
         "INSERT INTO sync (code, data, updated) VALUES (?1, ?2, ?3) " +
         "ON CONFLICT(code) DO UPDATE SET data = ?2, updated = ?3",
-      ).bind(code, data, Date.now()).run();
+      ).bind(code, data, Date.now()).run());
       return json(merged);
     }
     return json({ error: "method not allowed" }, 405);
-  },
-};
+  }
+}
