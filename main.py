@@ -859,7 +859,7 @@ def main(page: ft.Page, reopen=None):
                 toast("Синхронізовано", ft.Icons.CLOUD_DONE_ROUNDED)
         except Exception as ex:
             sync_state["dirty"] = True  # спробуємо наступного разу
-            if manual:
+            if manual and not quiet:  # тиха (на старті) — без повідомлення: повториться сама
                 msg = await explain(ex, "синхронізацію")
                 toast(msg, error_icon(msg))
         finally:
@@ -3863,7 +3863,7 @@ def main(page: ft.Page, reopen=None):
             if not p["released"] and not p["poster"]:
                 return None
             try:
-                return core.find_title(p["orig"], p["title"])
+                return core.find_title(p["orig"], p["title"], p["year"])
             except Exception:
                 return None
         found = await asyncio.gather(*[asyncio.to_thread(lookup, p) for p in saga["parts"]])
