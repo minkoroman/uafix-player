@@ -92,10 +92,10 @@
 
 | Пристрій | Файл |
 |---|---|
-| Windows | `UAFix-Player-Windows.exe` (запускається без встановлення) або `…-Windows.zip` |
+| Windows | `UAFix-Player-Windows.exe` (запускається без встановлення) |
 | macOS | `UAFix-Player-macOS.zip` → перетягніть `UAFix Player.app` у «Програми» |
-| Android-телефон | `UAFix-Player-Android-arm64.apk` (старі 32-бітні — `…-armv7.apk`) |
-| Android TV / приставка | `UAFix-Player-AndroidTV-arm64.apk` або `…-armv7.apk` (більшість приставок) |
+| Android-телефон | `UAFix-Player-Android-arm64.apk` |
+| Android TV / приставка | `UAFix-Player-AndroidTV-armv7.apk` (працює й на 64-бітних) |
 
 Збірки не підписані сертифікатом Apple чи Microsoft:
 - **macOS** — перший запуск: правий клік на застосунку → «Відкрити»;
@@ -130,7 +130,7 @@ python3 -m venv .venv
 ### Збірка й випуск
 
 Збирає GitHub Actions ([build.yml](.github/workflows/build.yml)): macOS, Windows (портативний
-`.exe`), Android і Android TV (окремі `.apk` під arm64 / armv7, шаблон із 90/120 Гц).
+`.exe`), Android (`.apk` arm64) і Android TV (`.apk` armv7), шаблон із 90/120 Гц.
 
 1. Додайте зверху в [CHANGELOG.md](CHANGELOG.md) розділ `## x.y.z` — він стане описом релізу
    й вікном «Що нового».
