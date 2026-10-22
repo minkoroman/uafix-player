@@ -1281,6 +1281,8 @@ def main(page: ft.Page, reopen=None):
         """TV: перемалювати виділення поточного розділу в меню (телефон — нижня панель)."""
         if st.get("sync_bottom_nav"):
             st["sync_bottom_nav"]()
+        if st.get("mark_sidebar"):
+            st["mark_sidebar"]()
         if not TV:
             return
         if st.get("tv_mark_tabs"):
@@ -1799,14 +1801,103 @@ def main(page: ft.Page, reopen=None):
                              visible=False, on_click=lambda e: back_home())
     title_block = ft.Column([heading_switcher, subheading], spacing=0, expand=True,
                             alignment=ft.MainAxisAlignment.CENTER)
+    # ── 2.0: вкладки «Фільми / Серіали / Аніме» (ПК і телефон) — текст із підкресленням
+    TOP_TABS = [("Фільми", "/films/"), ("Серіали", "/serials/"), ("Аніме", "/anime/")]
+
+    def top_tab(label, path):
+        sel = st["mode"][0] == "cat" and st["mode"][1] == path
+
+        def go(e):
+            quiet()
+            page.run_task(open_category, label, path)
+        return ft.Container(
+            ft.Column([ft.Text(label, size=14, weight=ft.FontWeight.W_600,
+                               color=TEXT if sel else MUTED),
+                       ft.Container(height=2, width=26, border_radius=1,
+                                    bgcolor=ACCENT if sel else ft.Colors.TRANSPARENT)],
+                      spacing=5, tight=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+            padding=ft.Padding.only(left=12, right=12, top=4, bottom=2), border_radius=8,
+            on_click=go, ink=True)
+
+    def top_tabs_row():
+        return ft.Row([top_tab(*t) for t in TOP_TABS], spacing=6,
+                      alignment=ft.MainAxisAlignment.CENTER)
+
+    desk_tabs = top_tabs_row() if is_desktop else None
+
+    def mark_top_tabs():
+        for row in (desk_tabs, st.get("phone_tabs")):
+            if row is None:
+                continue
+            row.controls = [top_tab(*t) for t in TOP_TABS]
+            try:
+                row.update()
+            except Exception:
+                pass
+
+    # ── ПК, 2.0: ліва бічна панель (Головна / Огляд / Історія / Обране / Налаштування)
+    SIDE_ITEMS = [("Головна", ft.Icons.HOME_OUTLINED, "home"),
+                  ("Огляд", ft.Icons.EXPLORE_OUTLINED, "explore"),
+                  ("Історія", ft.Icons.HISTORY_ROUNDED, HISTORY_PATH),
+                  ("Обране", ft.Icons.BOOKMARK_BORDER_ROUNDED, FAV_PATH),
+                  ("Налаштування", ft.Icons.SETTINGS_OUTLINED, "settings")]
+
+    def side_item(label, icon, key):
+        sel = (key == "home" and st["mode"][0] == "home") or \
+            (st["mode"][0] == "cat" and st["mode"][1] == key)
+
+        def go(e):
+            quiet()
+            if key == "home":
+                back_home()
+            elif key == "explore":
+                page.run_task(open_drawer)
+            elif key == "settings":
+                page.run_task(open_settings)
+            else:
+                page.run_task(open_category,
+                              "Обране" if key == FAV_PATH else "Історія переглядів", key)
+        return ft.Container(
+            ft.Row([ft.Icon(icon, size=20, color=ACCENT if sel else MUTED),
+                    ft.Text(label, size=14, weight=ft.FontWeight.W_600 if sel
+                            else ft.FontWeight.W_500, color=TEXT)], spacing=12),
+            padding=ft.Padding.symmetric(horizontal=12, vertical=10), border_radius=10,
+            bgcolor=SURFACE_3 if sel else None, on_click=go, ink=True)
+
+    side_list = ft.Column([side_item(*i) for i in SIDE_ITEMS], spacing=2)
+    desk_sidebar = ft.Container(
+        ft.Column([
+            ft.WindowDragArea(ft.Container(height=46 if is_mac else 16), maximizable=True),
+            ft.Container(ft.Text(spans=[ft.TextSpan("UAFix", ft.TextStyle(color=TEXT)),
+                                        ft.TextSpan(".", ft.TextStyle(color=ACCENT))],
+                                 size=20, weight=ft.FontWeight.W_800),
+                         padding=ft.Padding.only(left=14, bottom=14)),
+            side_list,
+        ], spacing=0),
+        width=220, bgcolor=SURFACE, padding=ft.Padding.symmetric(horizontal=10),
+        border=ft.Border.only(right=ft.BorderSide(1, BORDER))) if is_desktop else None
+
+    def mark_sidebar():
+        mark_top_tabs()
+        if desk_sidebar is None:
+            return
+        side_list.controls = [side_item(*i) for i in SIDE_ITEMS]
+        try:
+            side_list.update()
+        except Exception:
+            pass
+
+    st["mark_sidebar"] = mark_sidebar
+
     if is_mobile:
         settings_btn = ft.IconButton(ft.Icons.SETTINGS_OUTLINED, icon_color=TEXT,
                                      tooltip="Налаштування",
                                      on_click=lambda e: page.run_task(open_settings))
         # 2.0 «Полиці»: меню й налаштування — у нижній панелі («Каталог», «Налаштування»)
+        st["phone_tabs"] = top_tabs_row()
         top_bar = ft.Column([ft.Row([ft.Container(width=8), title_block, layout_toggle],
                                     spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                             ft.Row([search])], spacing=8)
+                             ft.Row([search]), st["phone_tabs"]], spacing=8)
     elif TV:
         # Поле вводу на телевізорі «захоплює» стрілки пульта — з нього не вийти. Тому тут
         # кнопка, а текст вводиться у вікні (його закриває «Назад»).
@@ -1946,14 +2037,21 @@ def main(page: ft.Page, reopen=None):
         # перетягувати вікно (і розгортати подвійним кліком) — лише за заголовок і порожнє
         # місце: раніше зоною перетягування була вся панель, і подвійний клік у полі пошуку
         # (щоб виділити слово) розгортав вікно на весь екран
-        top_bar = ft.Row([menu_btn, cat_back,
-                          ft.WindowDragArea(title_block, maximizable=True, expand=True),
-                          bell, search, layout_toggle, *win_buttons()],
-                         spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        # 2.0: ліва бічна панель (див. desk_sidebar), пошук — посередині, під ним вкладки
+        search.width = 420
+        top_bar = ft.Column([
+            ft.Row([cat_back,
+                    ft.WindowDragArea(title_block, maximizable=True, expand=True),
+                    search,
+                    ft.WindowDragArea(ft.Container(height=40), maximizable=True, expand=True),
+                    bell, layout_toggle, *win_buttons()],
+                   spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            desk_tabs,
+        ], spacing=6, tight=True)
     top_bar_box = ft.Container(
         top_bar,
-        padding=ft.Padding.only(left=12 + traffic_gap, right=8 if is_win else 20, top=10,
-                                bottom=10),
+        padding=ft.Padding.only(left=12 + (0 if is_desktop else traffic_gap),
+                                right=8 if is_win else 20, top=10, bottom=4 if is_desktop else 10),
         bgcolor=BG if is_mobile else ft.Colors.with_opacity(0.85, BG),
         blur=None if (is_mobile or TV) else ft.Blur(20, 20),
         border=ft.Border.only(bottom=ft.BorderSide(1, BORDER)),
@@ -2700,10 +2798,12 @@ def main(page: ft.Page, reopen=None):
 
     # ═════════════════════ головна (в стилі Apple TV) ═════════════════════
     hero = {"items": [], "i": 0, "hover": False, "loaded": False, "timer": 0}
-    side = 20 if is_mobile else 56
+    side = 20 if is_mobile else 56 if TV else 32
 
     def banner_height():
         h = page.height or 800
+        if is_desktop:  # 2.0: картка всередині сторінки, а не на весь екран
+            return max(300, min(380, int(h * 0.42)))
         return max(360, int((h - 64) * (0.62 if is_mobile else 0.9)))
 
     def kind_of(url):
@@ -2731,13 +2831,15 @@ def main(page: ft.Page, reopen=None):
 
     def slide_image(item):
         # «Ken Burns»: кадр повільно наближається, поки слайд на екрані
-        return ft.Container(
+        box = ft.Container(
             ft.Image(src=item.get("backdrop") or item["poster"], fit=ft.BoxFit.COVER,
                      gapless_playback=True,
                      width=float("inf"), height=float("inf")),
             expand=True, scale=1.0,
             animate_scale=ft.Animation(BANNER_INTERVAL * 1000 + 1500, ft.AnimationCurve.LINEAR),
             key=f"img{item['url']}")
+        # чистий кадр TMDB (без напису сайту на картинці), якщо знайдеться
+        return tmdb_swap(box, item, "w1280")
 
     def banner_focus(e):
         quiet()
@@ -2783,13 +2885,14 @@ def main(page: ft.Page, reopen=None):
         return ft.Column([
             ft.Text(("Новинка · " + kind if kind else "Новинка").upper(), size=12,
                     weight=ft.FontWeight.W_800, color=ACCENT),
-            ft.Text(info.get("title") or item["title"], size=40 if is_mobile else 54,
-                    weight=ft.FontWeight.W_800, color="#FFFFFF", max_lines=2,
+            ft.Text(info.get("title") or item["title"], size=40 if is_mobile else 36,
+                    weight=ft.FontWeight.W_800, color="#FFFFFF",
+                    max_lines=1 if is_desktop else 2,
                     overflow=ft.TextOverflow.ELLIPSIS),
             ft.Text(orig, size=16, color="#C9CDD4", visible=bool(orig)),
             ft.Row(meta + ([ft.Text(genres, size=13, color="#C9CDD4")] if genres else []),
                    spacing=8, wrap=True, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            ft.Text(info.get("description") or "", size=15, color="#D8DBE0", max_lines=3,
+            ft.Text(info.get("description") or "", size=14, color="#D8DBE0", max_lines=2,
                     overflow=ft.TextOverflow.ELLIPSIS, visible=not is_mobile),
             ft.Container(height=6),
             ft.Row([
@@ -2879,9 +2982,9 @@ def main(page: ft.Page, reopen=None):
                 begin=ft.Alignment.TOP_CENTER, end=ft.Alignment.BOTTOM_CENTER,
                 colors=["#00000000", "#00000000", "#101114" if ui.LIGHT else BG],
                 stops=[0, 0.6, 1])),
-            ft.Container(banner_text, left=side, bottom=86,
+            ft.Container(banner_text, left=side, bottom=62 if is_desktop else 86,
                          width=None if is_mobile else 640, right=side if is_mobile else None),
-            ft.Container(dots, left=side, bottom=40),
+            ft.Container(dots, left=side, bottom=26 if is_desktop else 40),
             arrow(ft.Icons.CHEVRON_LEFT_ROUNDED, -1, "left"),
             arrow(ft.Icons.CHEVRON_RIGHT_ROUNDED, 1, "right"),
         ], expand=True),
@@ -3185,14 +3288,16 @@ def main(page: ft.Page, reopen=None):
 
     # ── «Рекомендуємо»: найсвіжіше з головної сайту (фільми й серіали впереміш) —
     #    великі широкі картки першим рядом замість банера
-    rec_row = ft.ListView(horizontal=True, spacing=12 if is_mobile else 20, height=rec_row_h,
+    rec_row = ft.ListView(horizontal=True, spacing=12 if is_mobile else 20,
+                          height=rec_row_h if TV else poster_row_h,
                           padding=ft.Padding.symmetric(horizontal=side, vertical=10),
                           controls=[shimmer(ft.Container(width=rec_w, height=rec_w * 9 / 16,
                                                          bgcolor=SURFACE_2, border_radius=14),
                                             base_color=SURFACE_2, highlight_color=SURFACE_3)
                                     for _ in range(4)])
     rec_section = ft.Column([
-        ft.Container(ft.Text("Рекомендуємо", size=18 if is_mobile else 22,
+        ft.Container(ft.Text("Рекомендуємо" if TV else "Рекомендуємо для вас",
+                             size=18 if is_mobile else 22 if TV else 20,
                              weight=ft.FontWeight.W_700, color=TEXT),
                      padding=ft.Padding.only(left=side, right=side, top=8)),
         rec_row,
@@ -3214,7 +3319,9 @@ def main(page: ft.Page, reopen=None):
         cards = []
         for it in mixed[:10]:
             serial = "/serials/" in it["url"] or "/anime/" in it["url"]
-            c = wide_card(it, rec_w, big=True, badge="Нова серія" if serial else "Новинка")
+            c = wide_card(it, rec_w, big=True, badge="Нова серія" if serial else "Новинка") \
+                if TV else poster_card(it, width=poster_w,
+                                       caption="Нова серія" if serial else None)
             ui.reveal(c)
             cards.append(c)
         if TV and cards and not tv_first_tile:
@@ -3229,7 +3336,7 @@ def main(page: ft.Page, reopen=None):
     top_row = ft.ListView(horizontal=True, spacing=6 if is_mobile else 10, height=poster_row_h,
                           padding=ft.Padding.symmetric(horizontal=side, vertical=10))
     top_section = ft.Column([
-        ft.Container(ft.Text("Топ тижня", size=20 if is_mobile else 22,
+        ft.Container(ft.Text("Популярне зараз", size=18 if is_mobile else 20,
                              weight=ft.FontWeight.W_800, color=TEXT),
                      padding=ft.Padding.symmetric(horizontal=side)),
         top_row,
@@ -3249,6 +3356,19 @@ def main(page: ft.Page, reopen=None):
             return
         items = [f for f in found if isinstance(f, dict)][:10]
         if len(items) < 3:
+            return
+        if not TV:  # ПК і телефон: просто постери (як «Trending Now»)
+            cards = []
+            for it in items:
+                c = poster_card(it, width=poster_w)
+                ui.reveal(c)
+                cards.append(c)
+            top_row.controls = cards
+            top_section.visible = True
+            try:
+                top_section.update()
+            except Exception:
+                pass
             return
         num_size = poster_w * 0.95
         row = []
@@ -3340,9 +3460,12 @@ def main(page: ft.Page, reopen=None):
     home_content = ft.ListView(
         [rec_section, continue_section, fav_new_section, top_section,
          *[col for col, _ in shelves], ft.Container(height=120)] if TV else
-        [*([refresh_ring] if is_mobile else []), rec_section, continue_section,
-         fav_new_section, top_section, *[col for col, _ in shelves],
-         ft.Container(height=96 if is_mobile else 40)],
+        [*([refresh_ring] if is_mobile else []),
+         *([ft.Container(banner_swipe, border_radius=20, clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                         margin=ft.Margin.only(left=side, right=side, top=12))]
+           if is_desktop else []),
+         top_section, continue_section, rec_section, fav_new_section,
+         *[col for col, _ in shelves], ft.Container(height=96 if is_mobile else 40)],
         expand=True, spacing=18 if not TV else 28,
         on_scroll=home_scroll if is_mobile else None,
         padding=ft.Padding.only(top=6) if TV else 0, key="home")
@@ -3355,7 +3478,8 @@ def main(page: ft.Page, reopen=None):
         for _, load in shelves:
             page.run_task(load)
         page.run_task(load_top)
-        return  # 2.0 «Полиці»: замість банера — ряд «Рекомендуємо» (load_rec)
+        if not is_desktop:
+            return  # телефон і TV: без банера (ПК — картка-банер угорі)
         try:
             items = await asyncio.to_thread(core.featured)
         except Exception as ex:
@@ -3473,7 +3597,7 @@ def main(page: ft.Page, reopen=None):
             ft.NavigationBarDestination(icon=ft.Icons.HOME_OUTLINED,
                                         selected_icon=ft.Icons.HOME_ROUNDED, label="Головна"),
             ft.NavigationBarDestination(icon=ft.Icons.GRID_VIEW_OUTLINED,
-                                        selected_icon=ft.Icons.GRID_VIEW_ROUNDED, label="Каталог"),
+                                        selected_icon=ft.Icons.GRID_VIEW_ROUNDED, label="Огляд"),
             ft.NavigationBarDestination(icon=ft.Icons.BOOKMARK_BORDER_ROUNDED,
                                         selected_icon=ft.Icons.BOOKMARK_ROUNDED, label="Моє"),
             ft.NavigationBarDestination(icon=ft.Icons.SETTINGS_OUTLINED,
@@ -3486,8 +3610,14 @@ def main(page: ft.Page, reopen=None):
 
     home = ft.View(
         route="/", padding=0, bgcolor=BG, drawer=drawer, navigation_bar=bottom_nav,
-        controls=[safe(ft.Column([top_bar_box, recent_bar, genre_bar, filter_bar, home_body],
-                                 expand=True, spacing=0))],
+        controls=[safe(
+            ft.Row([desk_sidebar,
+                    ft.Column([top_bar_box, recent_bar, genre_bar, filter_bar, home_body],
+                              expand=True, spacing=0)],
+                   spacing=0, expand=True, vertical_alignment=ft.CrossAxisAlignment.STRETCH)
+            if desk_sidebar is not None else
+            ft.Column([top_bar_box, recent_bar, genre_bar, filter_bar, home_body],
+                      expand=True, spacing=0))],
     )
 
     # «Назад» на головному екрані Android (телефон і TV): з пошуку чи розділу — на головну,

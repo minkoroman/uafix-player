@@ -6,13 +6,14 @@ import appearance
 # ───────────── палітра ─────────────
 LIGHT = appearance.CURRENT["theme"] == "light"
 if LIGHT:
-    BG = "#F2F3F5"
-    SURFACE = "#FFFFFF"
-    SURFACE_2 = "#FFFFFF"
-    SURFACE_3 = "#ECEEF2"
-    BORDER = "#1F000000"
-    TEXT = "#15171C"
-    MUTED = "#5F6672"
+    # 2.0: світла — як нативні застосунки macOS: білий вміст, світло-сіра бічна панель
+    BG = "#FFFFFF"
+    SURFACE = "#F5F5F7"
+    SURFACE_2 = "#F2F2F4"
+    SURFACE_3 = "#E8E8ED"
+    BORDER = "#1A000000"
+    TEXT = "#1D1D1F"
+    MUTED = "#6E6E73"
     ACCENT = "#D9452F"  # трохи темніший — контрастніший на білому
 else:
     # 2.0 «Полиці»: стриманий графіт і корал
