@@ -450,6 +450,8 @@ def main(page: ft.Page, reopen=None):
     # pos, dur, ts}] — найновіше першим. Позиція (pos) і тривалість (dur) — у мілісекундах.
     history = []
     HISTORY_MAX = 40
+    voice_titles = {}  # адреса тайтлу → обрана озвучка
+    voice_recent = []  # студії озвучення, які обирали, — новіші першими
     searches = []  # нещодавні пошуки (лише на цьому пристрої) — новіші першими
     SEARCHES_MAX = 10
     favorites = []  # обране: [{url, title, orig, poster, age}] — новіше першим
@@ -491,6 +493,12 @@ def main(page: ft.Page, reopen=None):
             raw = await prefs.get("searches")
             if raw:
                 searches[:] = json.loads(raw)[:SEARCHES_MAX]
+            raw = await prefs.get("voice_titles")  # обрана озвучка кожного серіалу
+            if raw:
+                voice_titles.update(json.loads(raw))
+            raw = await prefs.get("voice_recent")  # студії, які обирали останніми
+            if raw:
+                voice_recent[:] = json.loads(raw)
             raw = await prefs.get("airplay_creds")  # ключі спарювання AirPlay
             if raw:
                 airplay.CREDENTIALS.update(json.loads(raw))
@@ -4364,8 +4372,8 @@ def main(page: ft.Page, reopen=None):
         if TV:  # autofocus не спрацьовує на вимкненій кнопці — фокус ставимо, щойно ввімкнули
             page.run_task(focus_later, resume_btn if has_resume else play_btn)
         episodes_section.visible = total > 1  # для фільму вистачає кнопки «Дивитись»
-        ctx["voices"] = all_voices(seasons)
-        ctx["voice"] = ctx["voices"][0] if ctx["voices"] else ""
+        ctx["voices"] = all_voices(seasons, item["url"])
+        ctx["voice"] = preferred_voice(ctx)
         render_voices(ctx)
         render_seasons(ctx)
         view.update()
@@ -4408,14 +4416,16 @@ def main(page: ft.Page, reopen=None):
             await ensure_sources(ep)
         except Exception:
             return
-        ctx["voices"] = all_voices(ctx["seasons"])
+        ctx["voices"] = all_voices(ctx["seasons"], ctx["item"]["url"])
         if ctx["voices"] and ctx["voice"] not in ctx["voices"]:
-            ctx["voice"] = ctx["voices"][0]
+            ctx["voice"] = preferred_voice(ctx)
         render_voices(ctx)
         page.update()
 
     # ── озвучки
-    def all_voices(seasons):
+    def all_voices(seasons, url=None):
+        """Озвучки тайтлу: з уже завантажених серій і (для серіалів зі сторінками серій) —
+        з плейлиста, який показує всі студії одразу (core.VOICE_STATS)."""
         voices = []
         for s in seasons:
             for ep in s["episodes"]:
@@ -4423,7 +4433,49 @@ def main(page: ft.Page, reopen=None):
                     v = src["entry"].get("voice") or ""
                     if v and v not in voices:
                         voices.append(v)
+        for v in core.VOICE_STATS.get(core.series_url(url), {}) if url else ():
+            if v and v not in voices:
+                voices.append(v)
         return sorted(voices, key=core.is_original)
+
+    def voice_counts(ctx):
+        """Скільки серій у кожній озвучці (для підпису на кнопці)."""
+        stats = core.VOICE_STATS.get(core.series_url(ctx["item"]["url"]))
+        if stats:
+            return stats
+        counts = {}
+        for s in ctx["seasons"]:
+            for ep in s["episodes"]:
+                for v in {src["entry"].get("voice") for src in ep["sources"] or []}:
+                    counts[v] = counts.get(v, 0) + 1
+        return counts
+
+    def preferred_voice(ctx):
+        """Озвучка за замовчуванням: обрана раніше для цього тайтлу → та, з якою дивились
+        (історія) → студія, яку останнім часом обирали → перша українська."""
+        voices = ctx["voices"]
+        if not voices:
+            return ""
+        h = history_entry(ctx["item"]["url"])
+        for v in (voice_titles.get(ctx["item"]["url"]), (h or {}).get("voice"), *voice_recent):
+            if v in voices:
+                return v
+        return voices[0]
+
+    def remember_voice(ctx, voice):
+        """Запам'ятати вибір: для цього тайтлу й як улюблену студію для нових."""
+        if not voice:
+            return
+        voice_titles[ctx["item"]["url"]] = voice
+        if not core.is_original(voice) and voice not in ("Українська",
+                                                          "Українська (багатоголоса)"):
+            voice_recent[:] = [voice] + [v for v in voice_recent if v != voice][:19]
+            page.run_task(prefs.set, "voice_recent", json.dumps(voice_recent, ensure_ascii=False))
+        # не роздуваємо сховище: лише останні 300 тайтлів
+        if len(voice_titles) > 300:
+            for k in list(voice_titles)[:len(voice_titles) - 300]:
+                voice_titles.pop(k, None)
+        page.run_task(prefs.set, "voice_titles", json.dumps(voice_titles, ensure_ascii=False))
 
     def voice_icon(voice):
         return ft.Icons.SUBTITLES_ROUNDED if core.is_original(voice) else ft.Icons.RECORD_VOICE_OVER_ROUNDED
@@ -4432,28 +4484,86 @@ def main(page: ft.Page, reopen=None):
         for src in ep["sources"]:
             if src["entry"].get("voice") == voice:
                 return src["entry"]
-        return ep["sources"][0]["entry"]
+        # цієї серії в обраній озвучці немає — улюблена студія, інакше перша українська
+        by_voice = {src["entry"].get("voice"): src["entry"] for src in ep["sources"]}
+        for v in voice_recent:
+            if v in by_voice:
+                return by_voice[v]
+        return next((src["entry"] for src in ep["sources"]
+                     if not core.is_original(src["entry"].get("voice") or "")),
+                    ep["sources"][0]["entry"])
 
     def render_voices(ctx):
+        """Вибір озвучки ще до перегляду: кнопки зі студіями (і скільки серій у кожної).
+        Вибір змінює лише вигляд наявних кнопок — на TV фокус лишається на місці."""
         row, box = ctx["voice_row"], ctx["voice_box"]
         voices = ctx["voices"]
         shown = len(voices) > 1
-        box.height, box.opacity = (46, 1) if shown else (0, 0)
+        box.height, box.opacity = (None, 1) if shown else (0, 0)
         if not shown:
             return
+        counts = voice_counts(ctx)
+        many = any(c > 1 for c in counts.values())
+        chips = ctx["voice_chips"] = {}
 
-        # лише інформація, які доріжки є (обирають озвучку в плеєрі) — без натискання й фокуса
-        chips = [ft.Container(
-            ft.Row([ft.Icon(voice_icon(v), size=16, color=MUTED),
-                    ft.Text(v, size=13, weight=ft.FontWeight.W_600, color=TEXT)],
-                   spacing=8, tight=True),
-            padding=ft.Padding.symmetric(horizontal=14, vertical=9), border_radius=12,
-            bgcolor=SURFACE_2, border=ft.Border.all(1, BORDER),
-            tooltip=None if TV else "Українська озвучка" if not core.is_original(v)
-            else "Оригінальна доріжка з субтитрами")
-            for v in voices]
+        def look(v, focused=None):
+            body, icon, text = chips[v]
+            sel = v == ctx["voice"]
+            if focused is not None:
+                body.data = focused
+            icon.icon = ft.Icons.CHECK_ROUNDED if sel else voice_icon(v)
+            icon.color = ACCENT if sel else MUTED
+            text.weight = ft.FontWeight.W_700 if sel else ft.FontWeight.W_600
+            body.bgcolor = ft.Colors.with_opacity(0.14, ACCENT) if sel else SURFACE_2
+            # TV: курсор пульта — біла рамка (поверх оранжевої «обраної»)
+            body.border = ft.Border.all(3, focus_ring) if body.data else \
+                ft.Border.all(1.5 if sel else 1, ACCENT if sel else BORDER)
+
+        def pick(v):
+            def handler(e):
+                quiet()
+                if ctx["voice"] == v:
+                    return
+                ctx["voice"] = v
+                remember_voice(ctx, v)
+                for x in chips:
+                    look(x)
+                try:
+                    row.update()
+                except Exception:
+                    pass
+                toast(f"Озвучка: {v}", voice_icon(v))
+            return handler
+
+        def focus_change(v):
+            def handler(f):
+                look(v, f)
+                chips[v][0].update()
+            return handler
+
+        controls = []
+        for v in voices:
+            n = counts.get(v)
+            label = v + (f" · {n} {plural(n, 'серія', 'серії', 'серій')}" if many and n else "")
+            icon = ft.Icon(voice_icon(v), size=16)
+            text = ft.Text(label, size=13, color=TEXT)
+            body = ft.Container(ft.Row([icon, text], spacing=8, tight=True),
+                                padding=ft.Padding.symmetric(horizontal=14, vertical=9),
+                                border_radius=12, data=False)
+            chips[v] = (body, icon, text)
+            look(v)
+            if TV:
+                btn = focusable(body, pick(v), on_focus_change=focus_change(v), radius=12)
+                btn.style.side = None
+                controls.append(btn)
+            else:
+                body.on_click = pick(v)
+                body.ink = True
+                body.tooltip = ("Оригінальна доріжка з субтитрами" if core.is_original(v)
+                                else "Обрати цю озвучку")
+                controls.append(body)
         row.controls = [ft.Text("Озвучка", size=13, color=MUTED, weight=ft.FontWeight.W_600),
-                        *chips]
+                        *controls]
 
     def render_seasons(ctx):
         seasons, current = ctx["seasons"], ctx["season"]
@@ -4635,7 +4745,7 @@ def main(page: ft.Page, reopen=None):
                   "Для цієї серії відео не знайдено",
                   ft.Icons.VIDEOCAM_OFF_ROUNDED)
             return
-        if ctx["voices"] != all_voices(ctx["seasons"]):
+        if ctx["voices"] != all_voices(ctx["seasons"], ctx["item"]["url"]):
             await detect_voices(ctx)
         if is_android or TV:
             mode = settings.get("player") or "ask"
@@ -5055,6 +5165,7 @@ def main(page: ft.Page, reopen=None):
             before.extend(queue[:idx])
             del queue[:idx], names[:idx]
             p["voice"] = v
+            remember_voice(ctx, v)
             # субтитри — як востаннє обирали для такого типу доріжки
             p["sub_lang"] = settings["sub_orig" if core.is_original(v) else "sub_ua"] or None
             reload_playlist(pos)

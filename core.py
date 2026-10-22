@@ -552,18 +552,65 @@ def parse_player(html):
     return res
 
 
-def voice_name(tab, url):
-    """Назва озвучки за підписом вкладки плеєра («Плеєр 2 (субтитри)») та іменем файлу."""
+# Студії озвучення: у плейлисті — тека з назвою студії над сезонами («Starfall / Сезон 1 /
+# Серія 3»), інакше — мітка в імені файлу (…aac.uaflix, …ua.mvo.dniprofilm).
+FILE_STUDIOS = [
+    (r"uaflix", "UAFlix"), (r"dniprofilm", "DniproFilm"),
+    (r"tak[._]treba", "Так Треба Продакшн"), (r"[._]mvo[._]ci(?:[._]|$)", "Цікава Ідея"),
+    (r"starfall", "Starfall"), (r"glass[._]?moon", "Glass Moon"),
+    (r"lem0nka", "Lem0nka Voice Project"), (r"amanogawa", "Amanogawa"),
+    (r"postmodern", "Postmodern"), (r"le[._]?doyen", "Le Doyen"),
+    (r"robota[._]?golosom", "Робота Голосом"), (r"hdrezka", "HDrezka Studio"),
+]
+SEASON_TITLE_RE = re.compile(r"^(?:сезон|season)\s*\d+|^\d+\s*(?:сезон|season)", re.I)
+EPISODE_TITLE_RE = re.compile(r"^(?:серія|episode)\s*\d+|^\d+\s*(?:серія|episode)", re.I)
+NOT_STUDIO_RE = re.compile(r"^\d{3,4}p$|фільм|трейлер|^\d+$", re.I)
+
+
+def split_studio(path):
+    """(шлях без теки студії, студія або None). «Starfall / Сезон 1 / Серія 3» →
+    (("Сезон 1", "Серія 3"), "Starfall")."""
+    parts = list(path)
+    for i, p in enumerate(parts):
+        if SEASON_TITLE_RE.match(p or ""):
+            if i > 0 and parts[i - 1] and not EPISODE_TITLE_RE.match(parts[i - 1]) \
+                    and not NOT_STUDIO_RE.search(parts[i - 1]):
+                return tuple(parts[:i - 1] + parts[i:]), parts[i - 1].strip()
+            return tuple(parts), None
+    if len(parts) >= 2 and EPISODE_TITLE_RE.match(parts[-1] or "") and parts[-2] \
+            and not EPISODE_TITLE_RE.match(parts[-2]) and not NOT_STUDIO_RE.search(parts[-2]):
+        return tuple(parts[:-2] + parts[-1:]), parts[-2].strip()
+    return tuple(parts), None
+
+
+def file_studio(url):
+    name = url.lower().split("/hls/")[0].rsplit("/", 1)[-1]
+    for pattern, studio in FILE_STUDIOS:
+        if re.search(pattern, name):
+            return studio
+    return None
+
+
+def voice_name(tab, url, studio=None):
+    """Назва озвучки: студія з плейлиста чи файлу, підпис вкладки плеєра («Плеєр 2
+    (субтитри)»), інакше — загальна («Українська», «Українська (багатоголоса)»)."""
     t, u = (tab or "").lower(), url.lower()
     # «_eng_» у назві файлу — оригінал, але лише якщо там немає й української:
     # «…_ukr_eng_…» чи «…_2xukr_eng_…» (дві українські доріжки) — файл із кількома
     # доріжками, і грає в ньому саме українська
     eng_file = re.search(r"[._]eng[._]", u) and \
         not re.search(r"[._](\d+x)?(ukr|ua|uk)[._]", u)
+    if studio and re.search(r"субтитр|оригінал|original|sub", studio, re.I):
+        return "Оригінал (субтитри)"
     if "субтитр" in t or "оригінал" in t or "original" in t or eng_file:
         return "Оригінал (ENG)"
+    if studio:
+        return studio
     if t and not re.match(r"^(плеєр|player|дивитись)", t):
         return tab.strip()  # власна назва студії / озвучки
+    studio = file_studio(u)
+    if studio:
+        return studio
     if ".mvo" in u:
         return "Українська (багатоголоса)"
     return "Українська"
@@ -625,7 +672,8 @@ def _page_streams(url, label=(), html=None):
                 continue
         tab = tabs[i] if i < len(tabs) else ""
         for path, link, subs in parse_player(fhtml):
-            voice = voice_name(tab, link)
+            path, studio = split_studio(path)
+            voice = voice_name(tab, link, studio)
             if not is_original(voice):
                 # до української доріжки «субтитри» — лише переклад написів на екрані
                 subs = [dict(x, title="Написи на екрані") if x["lang"] == "uk" else x for x in subs]
@@ -887,9 +935,48 @@ def group_episode_pages(episodes, locked=()):
             for n, eps in sorted(seasons.items())]
 
 
+VOICE_STATS = {}  # адреса серіалу → {озвучка: скільки серій}
+
+
+def series_url(page_url):
+    """Адреса серіалу за адресою сторінки серії."""
+    path = urlparse(page_url).path
+    m = re.search(r"/(?:season|sezon)[-_]?\d+", path, re.I)
+    return BASE + (path[:m.start()] if m else path).rstrip("/") + "/"
+
+
+def _entry_se(e):
+    """(сезон, серія) запису плейлиста за шляхом («Сезон 1», «Серія 3») або None."""
+    sn = ep = None
+    for p in e["path"]:
+        m = re.search(r"(\d+)", p or "")
+        if not m:
+            continue
+        if SEASON_TITLE_RE.match(p):
+            sn = int(m.group(1))
+        elif EPISODE_TITLE_RE.match(p):
+            ep = int(m.group(1))
+    return (sn, ep) if ep is not None else None
+
+
 def episode_sources(page_url):
-    """Потоки однієї серії (зі сторінки серії)."""
-    return make_sources(_page_streams(page_url)[1])
+    """Потоки однієї серії (зі сторінки серії). Плеєр на сторінці серії часто містить
+    увесь плейлист серіалу (усі студії × усі серії) — лишаємо лише цю серію, а скільки
+    серій має кожна студія, запам'ятовуємо (VOICE_STATS) для вибору озвучки."""
+    entries = _page_streams(page_url)[1]
+    m = EP_PATH_RE.search(urlparse(page_url).path)
+    keyed = [(_entry_se(e), e) for e in entries]
+    if m and sum(1 for k, _ in keyed if k) > 1:
+        stats = {}
+        for k, e in keyed:
+            if k:
+                stats.setdefault(e.get("voice") or "", set()).add(k)
+        VOICE_STATS[series_url(page_url)] = {v: len(x) for v, x in stats.items()}
+        want = (int(m.group(1)), int(m.group(2)))
+        mine = [e for k, e in keyed if k and k[1] == want[1] and (k[0] in (None, want[0]))]
+        if mine:
+            entries = mine + [e for k, e in keyed if not k]
+    return make_sources(entries)
 
 
 # ───────── зрозумілі повідомлення про помилки ─────────
