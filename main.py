@@ -4498,7 +4498,8 @@ def main(page: ft.Page, reopen=None):
         Вибір змінює лише вигляд наявних кнопок — на TV фокус лишається на місці."""
         row, box = ctx["voice_row"], ctx["voice_box"]
         voices = ctx["voices"]
-        shown = len(voices) > 1
+        # навіть одна озвучка — показуємо, чия вона (вибору тоді просто немає)
+        shown = len(voices) >= 1
         box.height, box.opacity = (None, 1) if shown else (0, 0)
         if not shown:
             return
@@ -4552,7 +4553,10 @@ def main(page: ft.Page, reopen=None):
                                 border_radius=12, data=False)
             chips[v] = (body, icon, text)
             look(v)
-            if TV:
+            if len(voices) == 1:  # лише підпис: не натискається й не бере фокус пульта
+                body.tooltip = None if TV else "Озвучка цього тайтлу"
+                controls.append(body)
+            elif TV:
                 btn = focusable(body, pick(v), on_focus_change=focus_change(v), radius=12)
                 btn.style.side = None
                 controls.append(btn)
