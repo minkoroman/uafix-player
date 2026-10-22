@@ -36,90 +36,16 @@ CATEGORIES = [
 _session = http.Session() if hasattr(http, "Session") else http
 
 
-# Перегляд з-за кордону: плеєр ashdi показує «Змініть країну перегляду» для не-українських
-# адрес (саме відео при цьому доступне звідусіль). Тоді сторінку плеєра (кілька КБ) беремо
-# через безкоштовний український проксі з публічних списків — застосунок сам знаходить
-# робочий. З'єднання з плеєром — HTTPS-тунель, тож проксі вмісту не бачить і не змінює.
-# Каталог і відео йдуть напряму. GEO — чи траплялось таке блокування.
+# Регіональні обмеження: за межами України сайт замість плеєра показує трейлер і «змініть
+# країну перегляду», а плеєр ashdi — «Змініть країну перегляду» (саме відео доступне
+# звідусіль). Тоді сторінку з плеєром (кілька КБ) беремо через мережу Tor із вихідними
+# вузлами в Україні (tor_runner.py); каталог і відео — напряму.
 GEO = {"blocked": False, "site": False}
 GEO_TEXT = "Змініть країну перегляду"  # плеєр ashdi
 SITE_GEO_TEXT = "змініть країну перегляду"  # сам сайт: «…за допомогою ВПН!» замість плеєра
-ABROAD = {"enabled": True, "proxy": None, "pool": [], "bad": set()}
-_pool_lock = __import__("threading").Lock()
-GEO_TEST = "https://ashdi.vip/vod/296470"
-PROXY_LISTS = [
-    "https://proxylist.geonode.com/api/proxy-list?country=UA&limit=100&page=1"
-    "&sort_by=lastChecked&sort_type=desc",
-    "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&country=UA"
-    "&timeout=10000",
-]
-
-
-def _proxy_candidates():
-    found = []
-    for src in PROXY_LISTS:
-        try:
-            r = _session.get(src, timeout=15, headers=HEADERS)
-            if src.startswith("https://proxylist.geonode"):
-                found += [f"http://{p['ip']}:{p['port']}" for p in r.json().get("data", [])
-                          if set(p.get("protocols", [])) & {"http", "https"}]
-            else:
-                found += ["http://" + x for x in r.text.split() if ":" in x]
-        except Exception:
-            continue
-    return [p for p in dict.fromkeys(found) if p not in ABROAD["bad"]]
-
-
-def _proxy_works(proxy):
-    try:
-        r = _session.get(GEO_TEST, timeout=10, headers=dict(HEADERS, Referer=BASE + "/"),
-                         proxies={"http": proxy, "https": proxy}, **IMPERSONATE)
-        return r.status_code == 200 and GEO_TEXT not in r.text and "file" in r.text
-    except Exception:
-        return False
-
-
-def _refill_pool(need=4):
-    """Знайти кілька робочих українських проксі (паралельна перевірка кандидатів)."""
-    import concurrent.futures as cf
-    with _pool_lock:
-        pool = ABROAD.setdefault("pool", [])
-        if len(pool) >= need:
-            return list(pool)
-        cands = [c for c in _proxy_candidates() if c not in pool][:60]
-    if not cands:
-        return list(ABROAD.get("pool", []))
-    ex = cf.ThreadPoolExecutor(16)
-    futures = {ex.submit(_proxy_works, c): c for c in cands}
-    try:
-        for f in cf.as_completed(futures, timeout=30):
-            c = futures[f]
-            if f.result():
-                with _pool_lock:
-                    if c not in ABROAD["pool"]:
-                        ABROAD["pool"].append(c)
-                    if len(ABROAD["pool"]) >= need:
-                        break
-            else:
-                ABROAD["bad"].add(c)
-    except Exception:
-        pass
-    ex.shutdown(wait=False, cancel_futures=True)
-    return list(ABROAD["pool"])
-
-
-def _drop_proxy(proxy):
-    with _pool_lock:
-        if proxy in ABROAD.get("pool", []):
-            ABROAD["pool"].remove(proxy)
-        ABROAD["bad"].add(proxy)
-
-
-def abroad_proxy(refresh=False):
-    """Перший робочий український проксі з пулу (або None)."""
-    pool = _refill_pool(1 if not refresh else 4)
-    ABROAD["proxy"] = pool[0] if pool else None
-    return ABROAD["proxy"]
+# enabled — налаштування; get_proxy() → «socks5h://127.0.0.1:порт» або None (задає main);
+# circuit — ім'я SOCKS, з яким останній маршрут Tor пропустило (різні імена — різні маршрути)
+ABROAD = {"enabled": True, "get_proxy": None, "circuit": None}
 
 
 def _get(url, referer=None, proxy=None):
@@ -628,41 +554,29 @@ def voice_name(tab, url, studio=None):
 
 
 def _fetch_abroad(url, referer, site=False):
-    """Сторінка, недоступна з-за кордону, — через українські проксі: одночасно через три з
-    пулу, береться перша нормальна відповідь (безкоштовні проксі часто «відвалюються»).
-    Дві спроби: з наявним пулом, потім з поповненим."""
-    import concurrent.futures as cf
-    if not ABROAD["enabled"]:
+    """Сторінка, недоступна в цьому регіоні, — через Tor. Деякі вихідні вузли сайт чи плеєр
+    не визнає українськими — тоді інший маршрут (інше ім'я SOCKS), до 6 спроб; вдалий
+    маршрут запам'ятовуємо."""
+    import random
+    getter = ABROAD.get("get_proxy")
+    if not ABROAD["enabled"] or getter is None:
+        return None
+    base = getter()
+    if not base:
         return None
     blocked = SITE_GEO_TEXT if site else GEO_TEXT
-
-    def one(proxy):
-        html = _get(url, referer=referer, proxy=proxy)
-        if blocked in html:
-            raise RuntimeError("geo")
-        return html
-
-    for attempt in range(2):
-        pool = _refill_pool(4 if attempt else 3)[:3]
-        if not pool:
-            return None
-        ex = cf.ThreadPoolExecutor(len(pool))
-        futures = {ex.submit(one, px): px for px in pool}
+    for _ in range(6):
+        name = ABROAD["circuit"] or f"u{random.randrange(10 ** 8)}"
+        proxy = base.replace("://", f"://{name}:x@", 1)
         try:
-            for f in cf.as_completed(futures, timeout=30):
-                try:
-                    html = f.result()
-                except Exception:
-                    _drop_proxy(futures[f])
-                    continue
-                ABROAD["proxy"] = futures[f]
-                ex.shutdown(wait=False, cancel_futures=True)
-                return html
+            html = _get(url, referer=referer, proxy=proxy)
         except Exception:
-            for f, px in futures.items():
-                if not f.done():
-                    _drop_proxy(px)
-        ex.shutdown(wait=False, cancel_futures=True)
+            ABROAD["circuit"] = None
+            continue
+        if blocked not in html:
+            ABROAD["circuit"] = name
+            return html
+        ABROAD["circuit"] = None
     return None
 
 

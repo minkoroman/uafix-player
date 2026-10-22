@@ -29,6 +29,7 @@ import feedback
 import sync
 import screen
 import tmdb
+import tor_runner
 import ui
 import updater
 from ui import ACCENT, BG, BORDER, MUTED, SURFACE, SURFACE_2, SURFACE_3, TEXT
@@ -440,7 +441,7 @@ def main(page: ft.Page, reopen=None):
                 # декодування відео: "auto" — апаратне, "copy" — апаратне сумісне,
                 # "off" — програмне (якщо на телевізорі картинка тремтить / відстає від звуку)
                 "hwdec": "auto",
-                "abroad": True,  # з-за кордону — плеєр через безкоштовний український проксі
+                "abroad": True,  # обхід регіональних обмежень — плеєр через Tor (tor_runner.py)
                 # Android / TV: "ask" — запитати при першому перегляді, "builtin" — свій плеєр,
                 # "external" — інша програма (VLC, MX Player…)
                 "player": "ask",
@@ -476,6 +477,15 @@ def main(page: ft.Page, reopen=None):
         sync_changed(now=True)
         return added
 
+    def tor_proxy():
+        """Tor для обходу регіональних обмежень (з потоку). Android — вбудований у застосунок,
+        запускає MainActivity (uafixupdate://tor); ПК — tor_runner завантажує й запускає сам."""
+        def android_launch(exits):
+            page.run_task(ft.UrlLauncher().launch_url,
+                          "uafixupdate://tor?" + urlencode({"exits": ",".join(exits[:40])}),
+                          mode=ft.LaunchMode.EXTERNAL_APPLICATION)
+        return tor_runner.proxy(android_launch if is_android else None)
+
     async def load_settings():
         try:
             for key in settings:
@@ -506,6 +516,7 @@ def main(page: ft.Page, reopen=None):
                 settings["layout"] = "list" if TV else "grid"
             apply_layout_default()
             core.ABROAD["enabled"] = bool(settings.get("abroad", True))
+            core.ABROAD["get_proxy"] = tor_proxy
         except Exception:
             pass
         render_continue()
@@ -530,13 +541,17 @@ def main(page: ft.Page, reopen=None):
         url = updater.asset_for(rel, platform_name, TV) or rel["url"]
         hint = ("Після завантаження відкрийте файл і натисніть «Встановити»."
                 if platform_name == "android" else
+                "Запустіть завантажений файл — це нова версія застосунку."
+                if url.lower().endswith(".exe") else
                 "Розпакуйте архів і замініть ним попередню версію застосунку.")
 
         def update(e):
             quiet()
             page.pop_dialog()
+            exe = url.lower().endswith(".exe")
             if platform_name in ("macos", "windows") and url != rel["url"] and (
-                    url.lower().endswith(".exe") or updater.desktop_target(platform_name)):
+                    (exe and os.environ.get("UAFIX_LAUNCHER")) or
+                    (not exe and updater.desktop_target(platform_name))):
                 # Mac / Windows: завантаження в застосунку й автоматичний перезапуск
                 page.run_task(download_and_install, url, rel["version"])
                 return
@@ -3682,9 +3697,9 @@ def main(page: ft.Page, reopen=None):
                 row(ft.Icons.STAR_OUTLINE_ROUNDED, "Рейтинг і жанр на картках",
                     "Оцінка й жанри з TMDB — одразу в списках, без відкриття фільму",
                     trailing=switch("card_meta")),
-                row(ft.Icons.PUBLIC_ROUNDED, "Перегляд з-за кордону",
-                    "Якщо плеєр недоступний у вашій країні — застосунок сам відкриє його через "
-                    "український сервер (лише плеєр, відео — напряму)",
+                row(ft.Icons.PUBLIC_ROUNDED, "Обхід регіональних обмежень",
+                    "Якщо фільм недоступний у вашому регіоні — застосунок сам відкриє плеєр "
+                    "через мережу Tor (лише плеєр; відео — напряму, без втрати швидкості)",
                     trailing=switch("abroad", on_set=lambda v: core.ABROAD.update(enabled=v))),
                 *([icon_row(row)] if icon_where() else []),
             ]), section("", [
@@ -3987,21 +4002,22 @@ def main(page: ft.Page, reopen=None):
         g, a = core.GEO, core.ABROAD
         if not (g["site"] or g["blocked"]):
             return ""
-        return (f" · за кордоном (сайт: {'так' if g['site'] else 'ні'}, ashdi: "
+        return (f" · регіон обмежено (сайт: {'так' if g['site'] else 'ні'}, ashdi: "
                 f"{'так' if g['blocked'] else 'ні'}, обхід: "
-                f"{'вимкнено' if not a['enabled'] else len(a.get('pool', []))} проксі)")
+                f"{'вимкнено' if not a['enabled'] else 'Tor ' + ('є' if a.get('circuit') else 'немає')}"
+                f"{' — ' + tor_runner.last_error() if tor_runner.last_error() else ''})")
 
     async def abroad_hint(loading):
-        """За кордоном перший фільм відкривається довше (застосунок шукає український
-        сервер) — пояснюємо один раз, щоб не здавалося, що все зависло."""
+        """Перший фільм в обхід регіональних обмежень відкривається довше (запуск Tor) —
+        пояснюємо один раз, щоб не здавалося, що все зависло."""
         for _ in range(40):
             await asyncio.sleep(0.25)
             if not loading["on"] or st.get("abroad_hinted"):
                 return
-            if core.GEO["site"] and not core.ABROAD.get("pool"):
+            if core.GEO["site"] and not core.ABROAD.get("circuit"):
                 st["abroad_hinted"] = True
-                toast("Ви за кордоном — підключаюсь через український сервер. Перший раз це "
-                      "до пів хвилини", ft.Icons.PUBLIC_ROUNDED)
+                toast("Фільм обмежено у вашому регіоні — відкриваю в обхід. Перший раз це "
+                      "до хвилини", ft.Icons.PUBLIC_ROUNDED)
                 return
 
     async def open_title(item, autoplay=False, resume=False):
@@ -4370,9 +4386,10 @@ def main(page: ft.Page, reopen=None):
             ep_status.value = (await explain(err, "серії")) if err else ""
             if core.GEO["blocked"] or core.GEO["site"]:  # плеєр не пускає з-за кордону
                 episodes_box.content = empty_state(
-                    ft.Icons.PUBLIC_OFF_ROUNDED, "Недоступно у вашій країні",
-                    "Цей плеєр працює лише в Україні, а український сервер для нього зараз не "
-                    "знайшовся. Спробуйте трохи пізніше або увімкніть VPN з українським сервером")
+                    ft.Icons.PUBLIC_OFF_ROUNDED, "Недоступно у вашому регіоні",
+                    "Увімкніть «Обхід регіональних обмежень» у налаштуваннях"
+                    if not core.ABROAD["enabled"] else
+                    "Не вдалося підключитися в обхід обмежень. Спробуйте трохи пізніше")
             else:
                 episodes_box.content = empty_state(ft.Icons.VIDEOCAM_OFF_ROUNDED,
                                                    "Потоків не знайдено",
@@ -4765,7 +4782,7 @@ def main(page: ft.Page, reopen=None):
             toast(msg, error_icon(msg), retry=lambda: page.run_task(play_episode, ctx, si, ei))
             return
         if not sources:
-            toast("Плеєр недоступний у вашій країні — увімкніть VPN з українським сервером"
+            toast("Недоступно у вашому регіоні — спробуйте трохи пізніше"
                   if core.GEO["blocked"] or core.GEO["site"] else
                   "Для цієї серії відео не знайдено",
                   ft.Icons.VIDEOCAM_OFF_ROUNDED)
@@ -6751,6 +6768,32 @@ def main(page: ft.Page, reopen=None):
 
     page.on_app_lifecycle_state_change = on_lifecycle
     page.on_view_pop = lambda e: go_back()
+
+    # ── посилання uafix://open?url=<сторінка тайтлу>[&play=1] (Android: схема з pyproject,
+    #    Flet передає його як маршрут «/?url=…»). play=1 — одразу продовжити перегляд
+    def handle_link(route):
+        from urllib.parse import parse_qs, urlparse as _up
+        q = parse_qs(_up(route or "").query)
+        url = (q.get("url") or [""])[0]
+        if not url.startswith(core.BASE + "/") or not core.ITEM_PATH_RE.match(_up(url).path):
+            return False  # лише сторінки тайтлів самого сайту
+        url = url.split("?")[0].split("#")[0]
+        url += "" if url.endswith("/") else "/"
+        h = history_entry(url) or next((f for f in favorites if f["url"] == url), None) or {}
+        item = {k: h.get(k, "") for k in ("title", "orig", "poster", "age")}
+        item["url"] = url
+        play = (q.get("play") or ["0"])[0] == "1"
+        while len(page.views) > 1:  # з будь-якого екрана — на головну, звідти тайтл
+            pop_view()
+        page.run_task(open_title, item, False, play and bool(h))
+        return True
+
+    def on_route(e):
+        quiet()
+        if "url=" in (e.route or ""):
+            handle_link(e.route)
+
+    page.on_route_change = on_route
     page.on_keyboard_event = on_key
     page.views.clear()
     page.views.append(home)
@@ -6759,6 +6802,8 @@ def main(page: ft.Page, reopen=None):
         page.run_task(page.window.center)
     page.run_task(startup)
     go_home()
+    if "url=" in (page.route or ""):  # застосунок запущено посиланням uafix://open?url=…
+        handle_link(page.route)
     if reopen == "settings":
         page.run_task(open_settings)
 

@@ -7,6 +7,7 @@ dependencies = [
     "flet==1.0.4",
     "flet-video==1.0.4",
     "requests",
+    "pysocks==1.7.1",  # requests через SOCKS (Tor — обхід регіональних обмежень, tor_runner.py)
     "beautifulsoup4",
     "pychromecast==14.0.10",
     "zeroconf==0.39.4",  # остання версія з чистим Python-пакетом (без збірки під Android)
@@ -32,6 +33,12 @@ hide_window_on_start = true
 # фон адаптивної іконки — як у самої іконки (інакше Flet підкладає білий і з'являється ореол);
 # сама іконка — assets/icon_android.png на всю площу, зміст у безпечній зоні
 adaptive_icon_background = "#15171C"
+
+# посилання uafix://open?url=<сторінка тайтлу на uafix.net>[&play=1] — відкрити тайтл
+# (напр. з головного екрана телевізора — одразу продовжити перегляд)
+[tool.flet.android.deep_linking]
+scheme = "uafix"
+host = "open"
 
 [tool.flet.android.permission]
 # встановлення завантаженого застосунком оновлення (системне вікно «Встановити»)

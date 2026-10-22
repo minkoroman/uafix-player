@@ -42,6 +42,7 @@ import android.provider.Settings
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterFragmentActivity
 import java.io.File
+import org.torproject.jni.TorService
 
 class MainActivity : FlutterFragmentActivity() {
     private var multicastLock: WifiManager.MulticastLock? = null
@@ -108,6 +109,22 @@ class MainActivity : FlutterFragmentActivity() {
                 startActivity(Intent(view).setDataAndType(Uri.parse(url), "video/*"))
             } catch (e2: Exception) {
             }
+        }
+    }
+
+    /** Tor із вихідними вузлами з exits (відбитки через кому), SOCKS на 127.0.0.1:19050. */
+    private fun startTor(exits: String) {
+        val nodes = exits.split(",").map { it.trim() }
+            .filter { it.matches(Regex("[0-9A-Fa-f]{40}")) }
+        val torrc = StringBuilder("SocksPort 127.0.0.1:19050\\nClientOnly 1\\n")
+        if (nodes.isNotEmpty()) {
+            torrc.append("ExitNodes ").append(nodes.joinToString(",") { "$" + it })
+                .append("\\nStrictNodes 1\\n")
+        }
+        try {
+            TorService.getTorrc(this).writeText(torrc.toString())
+            startService(Intent(this, TorService::class.java))
+        } catch (e: Exception) {
         }
     }
 
@@ -197,6 +214,10 @@ class MainActivity : FlutterFragmentActivity() {
         }
         if (data.host == "external") {  // «Плеєр: інша програма» — вибір плеєра (VLC, MX…)
             openExternal(data.getQueryParameter("url"), data.getQueryParameter("title"))
+            return true
+        }
+        if (data.host == "tor") {  // обхід регіональних обмежень — вбудований Tor (tor_runner.py)
+            startTor(data.getQueryParameter("exits") ?: "")
             return true
         }
         // update.apk кладе Python-частина в кеш (запасні варіанти — дані застосунку)
@@ -322,6 +343,22 @@ def main(out_dir: str) -> None:
         sys.exit("Не знайдено android:icon у <application> — шаблон змінився")
     manifest = manifest.replace(
         APP_ICON_ATTR, 'android:banner="@drawable/tv_banner"\n        ' + APP_ICON_ATTR, 1)
+    # Tor (обхід регіональних обмежень, tor_runner.py) — бібліотека Guardian Project
+    gradles = list(out.glob("build/*/android/app/build.gradle.kts"))
+    if len(gradles) != 1 or "dependencies {}" not in gradles[0].read_text(encoding="utf-8"):
+        sys.exit("app/build.gradle.kts без «dependencies {}» — шаблон змінився")
+    gradles[0].write_text(gradles[0].read_text(encoding="utf-8").replace(
+        "dependencies {}",
+        'dependencies {\n    implementation("info.guardianproject:tor-android:0.4.8.21")\n'
+        '    implementation("info.guardianproject:jtorctl:0.4.5.7")\n}'), encoding="utf-8")
+    # тло вікна, поки запускається Flutter: у шаблоні — системний колір теми (на TV у
+    # світлому режимі — білий, кілька секунд білого екрана); ставимо темне, як заставка
+    styles = list(out.glob("build/*/android/app/src/main/res/values*/styles.xml"))
+    if not styles:
+        sys.exit("styles.xml не знайдено — шаблон змінився")
+    for f in styles:
+        text = f.read_text(encoding="utf-8")
+        f.write_text(text.replace("?android:colorBackground", "#FF0D0E12"), encoding="utf-8")
     shutil.copy(BANNER, manifests[0].parent / "res" / "drawable-xhdpi" / "tv_banner.png")
     copy_icon_resources(manifests[0].parent / "res")
     manifests[0].write_text(manifest, encoding="utf-8")

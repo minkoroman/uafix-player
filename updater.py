@@ -59,19 +59,23 @@ def android_abi():
 def asset_for(release, platform_name, tv=False):
     """Посилання на файл саме для цього пристрою (або None)."""
     if platform_name == "android":
+        # з 1.6.2: телевізор — лише armv7 (працює й на 64-бітних TV), телефон — лише arm64;
+        # старіші релізи мали обидва варіанти — тоді спершу свій
         kind = "AndroidTV" if tv else "Android"
-        name = f"UAFix-Player-{kind}-{android_abi()}.apk"
-        # 32-бітна версія працює на будь-якому ARM-процесорі — запасний варіант
-        return release["assets"].get(name) or release["assets"].get(f"UAFix-Player-{kind}-armv7.apk")
+        assets = release["assets"]
+        return (assets.get(f"UAFix-Player-{kind}-{android_abi()}.apk") or
+                assets.get(f"UAFix-Player-{kind}-armv7.apk") or
+                (None if tv or android_abi() != "arm64" else
+                 assets.get("UAFix-Player-Android-arm64.apk")))
     elif platform_name == "macos":
         name = "UAFix-Player-macOS.zip"
     elif platform_name == "windows":
         # запущено з портативного .exe — оновлюємо його; інакше (стара тека з zip) — zip
         import os
-        if os.environ.get("UAFIX_LAUNCHER"):
-            return release["assets"].get("UAFix-Player-Windows.exe") or \
-                release["assets"].get("UAFix-Player-Windows.zip")
-        name = "UAFix-Player-Windows.zip"
+        # з 1.6.2 — лише портативний .exe (стара тека із zip теж отримає .exe — через
+        # браузер, див. main.show_update_dialog)
+        return release["assets"].get("UAFix-Player-Windows.exe") or \
+            release["assets"].get("UAFix-Player-Windows.zip")
     else:
         return None
     return release["assets"].get(name)

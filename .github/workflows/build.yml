@@ -131,7 +131,13 @@ jobs:
         if: matrix.target == 'apk'
         run: |
           python tools/android_template.py android_template
-          echo 'APK_ARGS=--template android_template/build --split-per-abi --arch arm64-v8a armeabi-v7a' >> "$GITHUB_ENV"
+          # у реліз: телефон — лише arm64, телевізор — лише armv7 (іде й на 64-бітних TV)
+          if [ "${{ matrix.tv }}" = "true" ]; then ARCH=armeabi-v7a; else ARCH=arm64-v8a; fi
+          echo "APK_ARGS=--template android_template/build --split-per-abi --arch $ARCH" >> "$GITHUB_ENV"
+          # код версії Android = 1000 × архітектура + номер збірки (armv7 — 1, arm64 — 2).
+          # TV раніше був і arm64 (2xxx): щоб armv7 ставився поверх, номер TV +2000 (→ 3xxx)
+          if [ "${{ matrix.tv }}" = "true" ]; then N=$(( ${{ github.run_number }} + 2000 )); else N=${{ github.run_number }}; fi
+          echo "BUILD_NUMBER=$N" >> "$GITHUB_ENV"
 
       # NDK — заздалегідь і з повторами: Gradle сам качає його посеред збірки, і архів
       # кілька разів приходив пошкодженим («Archive is not a ZIP archive») — збірка падала
@@ -157,7 +163,7 @@ jobs:
         timeout-minutes: 30
         run: |
           for attempt in 1 2; do
-            flet build ${{ matrix.target }} --yes --verbose --no-rich-output --build-number ${{ github.run_number }} --build-version ${{ env.APP_VERSION }} ${{ env.TV_ARGS }} ${{ env.APK_ARGS }} && exit 0
+            flet build ${{ matrix.target }} --yes --verbose --no-rich-output --build-number ${{ env.BUILD_NUMBER || github.run_number }} --build-version ${{ env.APP_VERSION }} ${{ env.TV_ARGS }} ${{ env.APK_ARGS }} && exit 0
             echo "::warning::flet build failed (attempt $attempt), retrying"
             rm -rf build/flutter/build
             # недокачаний NDK лишається на диску й ламає і другу спробу — прибрати
@@ -176,7 +182,8 @@ jobs:
       - name: Pack Windows app
         if: matrix.target == 'windows'
         shell: pwsh
-        run: Compress-Archive -Path build/windows/* -DestinationPath UAFix-Player-Windows.zip
+        # архів — лише всередину портативного .exe (окремо в реліз його не викладаємо)
+        run: Compress-Archive -Path build/windows/* -DestinationPath tools/win_launcher/app.zip
 
       # портативний .exe: запускач на Go з вбудованим zip (tools/win_launcher)
       - uses: actions/setup-go@v5
@@ -189,7 +196,6 @@ jobs:
         if: matrix.target == 'windows'
         shell: pwsh
         run: |
-          Copy-Item UAFix-Player-Windows.zip tools/win_launcher/app.zip
           # іконка — з нашого assets/icon.png (раніше бралась перша знайдена app_icon.ico,
           # і нею виявилась стандартна іконка Flet)
           python -m pip install --quiet pillow
@@ -204,8 +210,11 @@ jobs:
         if: matrix.target == 'apk'
         run: |
           ls -la build/apk
-          cp "$(ls build/apk/*arm64*.apk | head -1)" "${{ matrix.artifact }}-arm64.apk"
-          cp "$(ls build/apk/*armeabi*.apk | head -1)" "${{ matrix.artifact }}-armv7.apk"
+          if [ "${{ matrix.tv }}" = "true" ]; then
+            cp "$(ls build/apk/*armeabi*.apk | head -1)" "${{ matrix.artifact }}-armv7.apk"
+          else
+            cp "$(ls build/apk/*arm64*.apk | head -1)" "${{ matrix.artifact }}-arm64.apk"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
