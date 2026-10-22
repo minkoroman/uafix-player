@@ -3139,7 +3139,7 @@ def main(page: ft.Page, reopen=None):
             async def find(x):
                 async with sem:
                     return await asyncio.to_thread(core.find_any_title, x["orig"], x["title"],
-                                                   x["kind"])
+                                                   x["kind"], x["year"])
             found = await asyncio.gather(*[find(x) for x in trend], return_exceptions=True)
         except Exception:
             return
@@ -4136,7 +4136,7 @@ def main(page: ft.Page, reopen=None):
             if not p["released"] and not p["poster"]:
                 return None
             try:
-                return core.find_title(p["orig"], p["title"])
+                return core.find_title(p["orig"], p["title"], p["year"])
             except Exception:
                 return None
         found = await asyncio.gather(*[asyncio.to_thread(lookup, p) for p in saga["parts"]])
