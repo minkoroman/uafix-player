@@ -41,9 +41,11 @@ _session = http.Session() if hasattr(http, "Session") else http
 # через безкоштовний український проксі з публічних списків — застосунок сам знаходить
 # робочий. З'єднання з плеєром — HTTPS-тунель, тож проксі вмісту не бачить і не змінює.
 # Каталог і відео йдуть напряму. GEO — чи траплялось таке блокування.
-GEO = {"blocked": False}
-GEO_TEXT = "Змініть країну перегляду"
-ABROAD = {"enabled": True, "proxy": None, "bad": set(), "checked": 0.0}
+GEO = {"blocked": False, "site": False}
+GEO_TEXT = "Змініть країну перегляду"  # плеєр ashdi
+SITE_GEO_TEXT = "змініть країну перегляду"  # сам сайт: «…за допомогою ВПН!» замість плеєра
+ABROAD = {"enabled": True, "proxy": None, "pool": [], "bad": set()}
+_pool_lock = __import__("threading").Lock()
 GEO_TEST = "https://ashdi.vip/vod/296470"
 PROXY_LISTS = [
     "https://proxylist.geonode.com/api/proxy-list?country=UA&limit=100&page=1"
@@ -77,33 +79,50 @@ def _proxy_works(proxy):
         return False
 
 
-def abroad_proxy(refresh=False):
-    """Робочий український проксі (або None). Перевіряємо кандидатів паралельно — перший,
-    що відкрив плеєр, і береться; запам'ятовується до першого збою."""
+def _refill_pool(need=4):
+    """Знайти кілька робочих українських проксі (паралельна перевірка кандидатів)."""
     import concurrent.futures as cf
-    if ABROAD["proxy"] and not refresh:
-        return ABROAD["proxy"]
-    if ABROAD["proxy"]:
-        ABROAD["bad"].add(ABROAD["proxy"])
-        ABROAD["proxy"] = None
-    cands = _proxy_candidates()[:40]
+    with _pool_lock:
+        pool = ABROAD.setdefault("pool", [])
+        if len(pool) >= need:
+            return list(pool)
+        cands = [c for c in _proxy_candidates() if c not in pool][:60]
     if not cands:
-        return None
-    ex = cf.ThreadPoolExecutor(12)
-    futures = {ex.submit(_proxy_works, p): p for p in cands}
+        return list(ABROAD.get("pool", []))
+    ex = cf.ThreadPoolExecutor(16)
+    futures = {ex.submit(_proxy_works, c): c for c in cands}
     try:
-        for f in cf.as_completed(futures, timeout=25):
+        for f in cf.as_completed(futures, timeout=30):
+            c = futures[f]
             if f.result():
-                ABROAD["proxy"] = futures[f]
-                break
-            ABROAD["bad"].add(futures[f])
+                with _pool_lock:
+                    if c not in ABROAD["pool"]:
+                        ABROAD["pool"].append(c)
+                    if len(ABROAD["pool"]) >= need:
+                        break
+            else:
+                ABROAD["bad"].add(c)
     except Exception:
         pass
     ex.shutdown(wait=False, cancel_futures=True)
+    return list(ABROAD["pool"])
+
+
+def _drop_proxy(proxy):
+    with _pool_lock:
+        if proxy in ABROAD.get("pool", []):
+            ABROAD["pool"].remove(proxy)
+        ABROAD["bad"].add(proxy)
+
+
+def abroad_proxy(refresh=False):
+    """Перший робочий український проксі з пулу (або None)."""
+    pool = _refill_pool(1 if not refresh else 4)
+    ABROAD["proxy"] = pool[0] if pool else None
     return ABROAD["proxy"]
 
 
-def fetch(url, referer=None, proxy=None):
+def _get(url, referer=None, proxy=None):
     h = dict(HEADERS)
     kw = dict(IMPERSONATE)
     if referer:
@@ -112,10 +131,35 @@ def fetch(url, referer=None, proxy=None):
         h["Origin"] = f"{p.scheme}://{p.netloc}"
     if proxy:
         kw["proxies"] = {"http": proxy, "https": proxy}
-    r = _session.get(url, headers=h, timeout=20, **kw)
+    r = _session.get(url, headers=h, timeout=25 if proxy else 20, **kw)
     if r.status_code != 200:
         raise RuntimeError(f"HTTP {r.status_code}: {url}")
     return r.text
+
+
+def _player_page(url):
+    """Сторінка тайтлу чи серії (там, де плеєр), а не каталог чи пошук."""
+    path = urlparse(url).path
+    return urlparse(url).netloc == urlparse(BASE).netloc and \
+        bool(ITEM_PATH_RE.match(path) or EPISODE_LINK_RE.search(path) or "/sezon" in path)
+
+
+def fetch(url, referer=None, proxy=None):
+    """Сторінка за адресою. За кордоном сайт замість плеєра показує трейлер і «змініть
+    країну перегляду» — тоді сторінку з плеєром беремо через український проксі (а коли
+    вже знаємо, що ми за кордоном, — одразу через нього)."""
+    if proxy:
+        return _get(url, referer, proxy)
+    abroad = ABROAD["enabled"] and _player_page(url)
+    if abroad and GEO["site"]:
+        html = _fetch_abroad(url, referer, site=True)
+        if html is not None:
+            return html
+    html = _get(url, referer)
+    if abroad and SITE_GEO_TEXT in html:
+        GEO["blocked"] = GEO["site"] = True
+        return _fetch_abroad(url, referer, site=True) or html
+    return html
 
 
 # ───────── фільтри розділу (плагін сайту xfsort) ─────────
@@ -525,21 +569,42 @@ def voice_name(tab, url):
     return "Українська"
 
 
-def _fetch_abroad(url, referer):
-    """Сторінка плеєра, недоступна з-за кордону, — через український проксі (дві спроби:
-    збережений, потім свіжознайдений)."""
+def _fetch_abroad(url, referer, site=False):
+    """Сторінка, недоступна з-за кордону, — через українські проксі: одночасно через три з
+    пулу, береться перша нормальна відповідь (безкоштовні проксі часто «відвалюються»).
+    Дві спроби: з наявним пулом, потім з поповненим."""
+    import concurrent.futures as cf
     if not ABROAD["enabled"]:
         return None
-    for refresh in (False, True):
-        proxy = abroad_proxy(refresh)
-        if not proxy:
+    blocked = SITE_GEO_TEXT if site else GEO_TEXT
+
+    def one(proxy):
+        html = _get(url, referer=referer, proxy=proxy)
+        if blocked in html:
+            raise RuntimeError("geo")
+        return html
+
+    for attempt in range(2):
+        pool = _refill_pool(4 if attempt else 3)[:3]
+        if not pool:
             return None
+        ex = cf.ThreadPoolExecutor(len(pool))
+        futures = {ex.submit(one, px): px for px in pool}
         try:
-            html = fetch(url, referer=referer, proxy=proxy)
+            for f in cf.as_completed(futures, timeout=30):
+                try:
+                    html = f.result()
+                except Exception:
+                    _drop_proxy(futures[f])
+                    continue
+                ABROAD["proxy"] = futures[f]
+                ex.shutdown(wait=False, cancel_futures=True)
+                return html
         except Exception:
-            continue
-        if GEO_TEXT not in html:
-            return html
+            for f, px in futures.items():
+                if not f.done():
+                    _drop_proxy(px)
+        ex.shutdown(wait=False, cancel_futures=True)
     return None
 
 
@@ -795,7 +860,7 @@ def list_episodes(url, html, workers=4):
             except Exception:
                 return season_url, None
 
-        with ThreadPoolExecutor(max_workers=workers) as pool:
+        with ThreadPoolExecutor(max_workers=workers * 2 if GEO["site"] else workers) as pool:
             for season_url, season_html in pool.map(load, sorted(seasons)):
                 if season_html:
                     collect(season_html, season_url)
@@ -896,5 +961,5 @@ def featured(count=7, workers=7):
                              info.get("year", ""))
         return dict(item, info=info, backdrop=wide)
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
+    with ThreadPoolExecutor(max_workers=workers * 2 if GEO["site"] else workers) as pool:
         return list(pool.map(enrich, mixed))

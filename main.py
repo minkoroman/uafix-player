@@ -3389,7 +3389,7 @@ def main(page: ft.Page, reopen=None):
             sending = ft.ProgressRing(width=18, height=18, stroke_width=2, color=ACCENT,
                                       visible=False)
             device = f"{platform_name or page.platform}{' (TV)' if TV else ''}"
-            signature = f"UAFix Player {updater.VERSION} · {device}"
+            signature = f"UAFix Player {updater.VERSION} · {device}" + geo_note()
 
             async def submit(e):
                 send_btn.disabled, sending.visible = True, True
@@ -3527,7 +3527,7 @@ def main(page: ft.Page, reopen=None):
 
         def issue_url():
             device = f"{platform_name or page.platform}{' (TV)' if TV else ''}"
-            body = (f"**Версія:** {updater.VERSION}\n**Пристрій:** {device}\n\n"
+            body = (f"**Версія:** {updater.VERSION}\n**Пристрій:** {device}{geo_note()}\n\n"
                     "**Що сталося:**\n\n\n**Як повторити (фільм / серія, що натискали):**\n\n\n"
                     "**Скріншот або відео** (можна перетягнути сюди):\n")
             return (f"https://github.com/{updater.REPO}/issues/new?"
@@ -3953,6 +3953,28 @@ def main(page: ft.Page, reopen=None):
         clear_btn.visible = True
         page.run_task(do_search, q)
 
+    def geo_note():
+        """Для звіту про проблему: чи застосунок за кордоном і як справи з обходом."""
+        g, a = core.GEO, core.ABROAD
+        if not (g["site"] or g["blocked"]):
+            return ""
+        return (f" · за кордоном (сайт: {'так' if g['site'] else 'ні'}, ashdi: "
+                f"{'так' if g['blocked'] else 'ні'}, обхід: "
+                f"{'вимкнено' if not a['enabled'] else len(a.get('pool', []))} проксі)")
+
+    async def abroad_hint(loading):
+        """За кордоном перший фільм відкривається довше (застосунок шукає український
+        сервер) — пояснюємо один раз, щоб не здавалося, що все зависло."""
+        for _ in range(40):
+            await asyncio.sleep(0.25)
+            if not loading["on"] or st.get("abroad_hinted"):
+                return
+            if core.GEO["site"] and not core.ABROAD.get("pool"):
+                st["abroad_hinted"] = True
+                toast("Ви за кордоном — підключаюсь через український сервер. Перший раз це "
+                      "до пів хвилини", ft.Icons.PUBLIC_ROUNDED)
+                return
+
     async def open_title(item, autoplay=False, resume=False):
         release_search()
         ctx = {"item": item, "info": None, "seasons": [], "season": 0}
@@ -4245,8 +4267,11 @@ def main(page: ft.Page, reopen=None):
         view.update()  # лише цей екран (не всю сторінку з картками під ним)
 
         # ── інформація про тайтл
+        loading = {"on": True}
+        page.run_task(abroad_hint, loading)
         try:
             html = await asyncio.to_thread(core.fetch, item["url"])
+            loading["on"] = False
             info = await asyncio.to_thread(core.parse_title, html, item["url"])
         except Exception as ex:
             ep_status.value = await explain(ex, "сторінку тайтлу")
@@ -4314,7 +4339,7 @@ def main(page: ft.Page, reopen=None):
         if not seasons:
             play_btn.content = "Відео не знайдено"
             ep_status.value = (await explain(err, "серії")) if err else ""
-            if core.GEO["blocked"]:  # плеєр сайту не пускає з-за кордону
+            if core.GEO["blocked"] or core.GEO["site"]:  # плеєр не пускає з-за кордону
                 episodes_box.content = empty_state(
                     ft.Icons.PUBLIC_OFF_ROUNDED, "Недоступно у вашій країні",
                     "Цей плеєр працює лише в Україні, а український сервер для нього зараз не "
@@ -4606,7 +4631,8 @@ def main(page: ft.Page, reopen=None):
             return
         if not sources:
             toast("Плеєр недоступний у вашій країні — увімкніть VPN з українським сервером"
-                  if core.GEO["blocked"] else "Для цієї серії відео не знайдено",
+                  if core.GEO["blocked"] or core.GEO["site"] else
+                  "Для цієї серії відео не знайдено",
                   ft.Icons.VIDEOCAM_OFF_ROUNDED)
             return
         if ctx["voices"] != all_voices(ctx["seasons"]):
