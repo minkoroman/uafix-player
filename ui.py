@@ -15,14 +15,14 @@ if LIGHT:
     MUTED = "#5F6672"
     ACCENT = "#D9452F"  # трохи темніший — контрастніший на білому
 else:
-    # 2.0 «Кінозал»: графіт і корал
-    BG = "#121212"
-    SURFACE = "#1A1A1A"
-    SURFACE_2 = "#1E1E1E"
-    SURFACE_3 = "#2A2A2A"
-    BORDER = "#14FFFFFF"
-    TEXT = "#F2F2F2"
-    MUTED = "#A3A3A3"
+    # 2.0 «Полиці»: стриманий графіт і корал
+    BG = "#101114"
+    SURFACE = "#15161A"
+    SURFACE_2 = "#191B20"
+    SURFACE_3 = "#23252B"
+    BORDER = "#2A2C33"
+    TEXT = "#F4F4F5"
+    MUTED = "#A1A1AA"
     ACCENT = "#E5533D"
 ACCENT_2 = "#FF8A6B"
 GOLD = "#F5C518"
@@ -40,7 +40,7 @@ ACCENT_GRADIENT = ft.LinearGradient(
     begin=ft.Alignment.TOP_LEFT, end=ft.Alignment.BOTTOM_RIGHT, colors=[ACCENT_2, ACCENT])
 
 
-FONT = "Manrope"  # assets/fonts/Manrope.ttf (SIL OFL), реєструється в main через page.fonts
+FONT = "Inter"  # assets/fonts/Inter.ttf (SIL OFL), реєструється в main через page.fonts
 
 
 def theme():
