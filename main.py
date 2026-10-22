@@ -1211,6 +1211,10 @@ def main(page: ft.Page, reopen=None):
         ft.NavigationDrawerDestination(
             label="Налаштування", icon=ft.Icon(ft.Icons.SETTINGS_ROUNDED, color=MUTED),
             selected_icon=ft.Icon(ft.Icons.SETTINGS_ROUNDED, color=ACCENT)),
+        ft.NavigationDrawerDestination(
+            label="Повідомити про проблему",
+            icon=ft.Icon(ft.Icons.BUG_REPORT_OUTLINED, color=MUTED),
+            selected_icon=ft.Icon(ft.Icons.BUG_REPORT_OUTLINED, color=ACCENT)),
         ft.Container(ft.Text(f"Версія {updater.VERSION}", size=12, color=MUTED),
                      padding=ft.Padding.only(left=28, right=20, top=8,
                                              bottom=56 if TV else 24)),
@@ -1261,6 +1265,8 @@ def main(page: ft.Page, reopen=None):
         out += [ft.Container(ft.Divider(color=BORDER),
                              padding=ft.Padding.only(left=20, right=20, top=10)),
                 tv_nav_item("Налаштування", ft.Icons.SETTINGS_ROUNDED, 1 + len(DESTINATIONS)),
+                tv_nav_item("Повідомити про проблему", ft.Icons.BUG_REPORT_OUTLINED,
+                            2 + len(DESTINATIONS)),
                 drawer_controls[-1]]
         return out
 
@@ -1297,9 +1303,16 @@ def main(page: ft.Page, reopen=None):
         on_change=lambda e: page.run_task(on_nav, e.control.selected_index),
     )
 
-    SETTINGS_NAV = 1 + len(DESTINATIONS)  # «Налаштування» — останній пункт меню
+    SETTINGS_NAV = 1 + len(DESTINATIONS)  # «Налаштування» і «Повідомити про проблему» —
+    REPORT_NAV = 2 + len(DESTINATIONS)    # останні пункти меню
 
     async def on_nav(index):
+        if index == REPORT_NAV:
+            drawer.selected_index = st.get("nav_index")  # виділення лишаємо на розділі
+            drawer.update()
+            await home.close_drawer()
+            report_problem()
+            return
         if index == SETTINGS_NAV:
             drawer.selected_index = st.get("nav_index")  # виділення лишаємо на розділі
             drawer.update()
@@ -3183,6 +3196,81 @@ def main(page: ft.Page, reopen=None):
                                    spacing=4, tight=True),
                    on_click=open_picker)
 
+    # ── «Повідомити про проблему» (з меню й із «Про застосунок»)
+    def report_problem():
+        open_feedback() if feedback.enabled() else page.run_task(open_link_async, issue_url())
+
+    async def open_link_async(url):
+        await ft.UrlLauncher().launch_url(url)
+
+    def open_feedback():
+        kind = {"value": "bug"}
+        kinds = ft.SegmentedButton(
+            selected=["bug"], show_selected_icon=False,
+            # короткі підписи без емодзі — на вузькому екрані телефона довгі розривалися
+            segments=[ft.Segment(k, label=ft.Text(v, size=14, no_wrap=True,
+                                                  weight=ft.FontWeight.W_600))
+                      for k, v in (("bug", "Помилка"), ("idea", "Ідея"),
+                                   ("review", "Відгук"))],
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=10), side=ft.BorderSide(1, BORDER),
+                bgcolor={ft.ControlState.SELECTED: ft.Colors.with_opacity(0.18, ACCENT),
+                         ft.ControlState.DEFAULT: SURFACE_2},
+                color={ft.ControlState.SELECTED: ACCENT, ft.ControlState.DEFAULT: TEXT}),
+            on_change=lambda e: kind.update(value=e.control.selected[0]))
+        text = ft.TextField(
+            multiline=True, min_lines=4, max_lines=8, max_length=feedback.MAX_LEN,
+            hint_text="Що сталося? Який фільм / серія, що натискали…", autofocus=not TV,
+            filled=True, fill_color=SURFACE_2, cursor_color=ACCENT, text_size=14,
+            border={ft.ControlState.FOCUSED: ft.OutlineInputBorder(
+                        border_radius=12, side=ft.BorderSide(1.5, ACCENT)),
+                    ft.ControlState.DEFAULT: ft.OutlineInputBorder(
+                        border_radius=12, side=ft.BorderSide(1, BORDER))})
+        sending = ft.ProgressRing(width=18, height=18, stroke_width=2, color=ACCENT,
+                                  visible=False)
+        device = f"{platform_name or page.platform}{' (TV)' if TV else ''}"
+        signature = f"UAFix Player {updater.VERSION} · {device}" + geo_note()
+
+        async def submit(e):
+            send_btn.disabled, sending.visible = True, True
+            dlg.update()
+            try:
+                await asyncio.to_thread(feedback.send, kind["value"], text.value, signature)
+            except ValueError as ex:
+                send_btn.disabled, sending.visible = False, False
+                dlg.update()
+                toast(str(ex), ft.Icons.ERROR_OUTLINE_ROUNDED)
+                return
+            page.pop_dialog()
+            toast("Дякую! Повідомлення надіслано", ft.Icons.CHECK_CIRCLE_ROUNDED)
+
+        send_btn = ft.FilledButton("Надіслати", icon=ft.Icons.SEND_ROUNDED, on_click=submit,
+                                   style=ft.ButtonStyle(bgcolor=ACCENT, color="#FFFFFF",
+                                                        icon_color="#FFFFFF"))
+        dlg = ft.AlertDialog(
+            title=ft.Text("Повідомити про проблему", weight=ft.FontWeight.W_800,
+                          size=20 if is_mobile else 24),
+            bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18), scrollable=True,
+            content=ft.Column([
+                kinds, text,
+                ft.Text(f"До повідомлення додається: {signature}", size=11, color=MUTED),
+            ], tight=True, spacing=12, width=dialog_width()),
+            actions=[sending,
+                     ft.TextButton("Скасувати", on_click=lambda e: page.pop_dialog(),
+                                   style=ft.ButtonStyle(color=MUTED)),
+                     send_btn],
+        )
+        show_dialog(dlg)
+
+
+    def issue_url():
+        device = f"{platform_name or page.platform}{' (TV)' if TV else ''}"
+        body = (f"**Версія:** {updater.VERSION}\n**Пристрій:** {device}{geo_note()}\n\n"
+                "**Що сталося:**\n\n\n**Як повторити (фільм / серія, що натискали):**\n\n\n"
+                "**Скріншот або відео** (можна перетягнути сюди):\n")
+        return (f"https://github.com/{updater.REPO}/issues/new?"
+                + urlencode({"title": "Проблема: ", "body": body, "labels": "bug"}))
+
     async def open_settings(group=None):
         """Налаштування: без group — список груп, з group — сторінка цієї групи."""
         def section(title, rows):
@@ -3371,65 +3459,6 @@ def main(page: ft.Page, reopen=None):
             page.run_task(ft.UrlLauncher().launch_url, url,
                           mode=ft.LaunchMode.EXTERNAL_APPLICATION)
 
-        def open_feedback():
-            kind = {"value": "bug"}
-            kinds = ft.SegmentedButton(
-                selected=["bug"], show_selected_icon=False,
-                # короткі підписи без емодзі — на вузькому екрані телефона довгі розривалися
-                segments=[ft.Segment(k, label=ft.Text(v, size=14, no_wrap=True,
-                                                      weight=ft.FontWeight.W_600))
-                          for k, v in (("bug", "Помилка"), ("idea", "Ідея"),
-                                       ("review", "Відгук"))],
-                style=ft.ButtonStyle(
-                    shape=ft.RoundedRectangleBorder(radius=10), side=ft.BorderSide(1, BORDER),
-                    bgcolor={ft.ControlState.SELECTED: ft.Colors.with_opacity(0.18, ACCENT),
-                             ft.ControlState.DEFAULT: SURFACE_2},
-                    color={ft.ControlState.SELECTED: ACCENT, ft.ControlState.DEFAULT: TEXT}),
-                on_change=lambda e: kind.update(value=e.control.selected[0]))
-            text = ft.TextField(
-                multiline=True, min_lines=4, max_lines=8, max_length=feedback.MAX_LEN,
-                hint_text="Що сталося? Який фільм / серія, що натискали…", autofocus=not TV,
-                filled=True, fill_color=SURFACE_2, cursor_color=ACCENT, text_size=14,
-                border={ft.ControlState.FOCUSED: ft.OutlineInputBorder(
-                            border_radius=12, side=ft.BorderSide(1.5, ACCENT)),
-                        ft.ControlState.DEFAULT: ft.OutlineInputBorder(
-                            border_radius=12, side=ft.BorderSide(1, BORDER))})
-            sending = ft.ProgressRing(width=18, height=18, stroke_width=2, color=ACCENT,
-                                      visible=False)
-            device = f"{platform_name or page.platform}{' (TV)' if TV else ''}"
-            signature = f"UAFix Player {updater.VERSION} · {device}" + geo_note()
-
-            async def submit(e):
-                send_btn.disabled, sending.visible = True, True
-                dlg.update()
-                try:
-                    await asyncio.to_thread(feedback.send, kind["value"], text.value, signature)
-                except ValueError as ex:
-                    send_btn.disabled, sending.visible = False, False
-                    dlg.update()
-                    toast(str(ex), ft.Icons.ERROR_OUTLINE_ROUNDED)
-                    return
-                page.pop_dialog()
-                toast("Дякую! Повідомлення надіслано", ft.Icons.CHECK_CIRCLE_ROUNDED)
-
-            send_btn = ft.FilledButton("Надіслати", icon=ft.Icons.SEND_ROUNDED, on_click=submit,
-                                       style=ft.ButtonStyle(bgcolor=ACCENT, color="#FFFFFF",
-                                                            icon_color="#FFFFFF"))
-            dlg = ft.AlertDialog(
-                title=ft.Text("Повідомити про проблему", weight=ft.FontWeight.W_800,
-                              size=20 if is_mobile else 24),
-                bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18), scrollable=True,
-                content=ft.Column([
-                    kinds, text,
-                    ft.Text(f"До повідомлення додається: {signature}", size=11, color=MUTED),
-                ], tight=True, spacing=12, width=dialog_width()),
-                actions=[sending,
-                         ft.TextButton("Скасувати", on_click=lambda e: page.pop_dialog(),
-                                       style=ft.ButtonStyle(color=MUTED)),
-                         send_btn],
-            )
-            show_dialog(dlg)
-
         def sync_rows():
             code = settings["sync_code"]
             if not code:
@@ -3532,14 +3561,6 @@ def main(page: ft.Page, reopen=None):
                          ft.FilledButton("Вимкнути", on_click=confirm,
                                          style=ft.ButtonStyle(bgcolor="#E5484D", color="#FFFFFF"))],
             ))
-
-        def issue_url():
-            device = f"{platform_name or page.platform}{' (TV)' if TV else ''}"
-            body = (f"**Версія:** {updater.VERSION}\n**Пристрій:** {device}{geo_note()}\n\n"
-                    "**Що сталося:**\n\n\n**Як повторити (фільм / серія, що натискали):**\n\n\n"
-                    "**Скріншот або відео** (можна перетягнути сюди):\n")
-            return (f"https://github.com/{updater.REPO}/issues/new?"
-                    + urlencode({"title": "Проблема: ", "body": body, "labels": "bug"}))
 
         fit_options = [("Авто", "auto")] + [(n, k) for k, n, _ in FIT_MODES]
 
