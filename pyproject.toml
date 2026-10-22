@@ -50,15 +50,15 @@ NSBonjourServices = ["_googlecast._tcp"]
 
 # заставка під час запуску — темна, в кольорі застосунку (за замовчуванням біла)
 [tool.flet.splash]
-color = "#0D0E12"
-dark_color = "#0D0E12"
+color = "#121212"
+dark_color = "#121212"
 
 [tool.flet.boot_screen.flet]
 theme_mode = "dark"
-bgcolor_light = "#0D0E12"
-bgcolor_dark = "#0D0E12"
-spinner_color_light = "#FF6A3D"
-spinner_color_dark = "#FF6A3D"
+bgcolor_light = "#121212"
+bgcolor_dark = "#121212"
+spinner_color_light = "#E5533D"
+spinner_color_dark = "#E5533D"
 spinner_size = 36
 text_color_light = "#9BA1AC"
 text_color_dark = "#9BA1AC"

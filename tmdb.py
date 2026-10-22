@@ -173,10 +173,10 @@ def _meta_of(d):
     ids = d.get("genre_ids") or [g["id"] for g in d.get("genres", [])]
     for g in d.get("genres", []):  # з деталей — одразу з назвами
         _genres.setdefault(g["id"], g.get("name") or "")
-    return {"r": rating or None, "g": ids[:3], "v": META_V}
+    return {"r": rating or None, "g": ids[:3], "p": d.get("poster_path") or "", "v": META_V}
 
 
-META_V = 2  # версія запису: старіші (з порогом голосів) — перерахувати
+META_V = 3  # версія запису: 3 — з вертикальним постером ("p")
 
 
 def _genre_names(ids):
@@ -207,6 +207,24 @@ def meta_cached(url):
                                                    for i in m["g"] if _genres.get(i)]}
 
 
+def poster_cached(url, size="w342"):
+    """(чи відомо, URL вертикального постера або None) — без мережі."""
+    if not TMDB_TOKEN:
+        return True, None
+    with _lock:
+        _load()
+        m = _meta.get(url)
+        if m is None or m.get("v") != META_V:
+            return False, None
+        return True, (IMG + size + m["p"]) if m.get("p") else None
+
+
+def poster(url, title, orig="", year="", size="w342"):
+    """URL вертикального постера (TMDB) або None. Блокує — з потоку."""
+    meta(url, title, orig, year)
+    return poster_cached(url, size)[1]
+
+
 def meta(url, title, orig="", year="", site=None):
     """Рейтинг і жанри тайтлу для картки. Блокує (мережа) — з потоку.
     site(url) → (рейтинг, [жанри]) — запасне джерело (сторінка тайтлу на сайті), коли TMDB
@@ -235,7 +253,7 @@ def meta(url, title, orig="", year="", site=None):
             s_rating, s_genres = None, []
         rating = rating or s_rating
         names = names or s_genres
-        m = {"r": rating, "g": [], "names": names, "v": META_V}
+        m = {"r": rating, "g": [], "names": names, "p": (m or {}).get("p", ""), "v": META_V}
     if m is None:
         return None
     with _lock:

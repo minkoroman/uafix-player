@@ -141,6 +141,8 @@ except ImportError:
 TV_CARD_W = 300
 
 POSTER_RATIO = 16 / 9  # картинки на сайті горизонтальні (1200×675, 800×450)
+# 2.0: вертикальні постери (TMDB) — сітка: постер 2:3 + два рядки підпису
+POSTER_CELL = 0.56
 
 
 def plural(n, one, few, many):
@@ -172,6 +174,7 @@ def main(page: ft.Page, reopen=None):
     gen, first = RUN["gen"], reopen is None
     page.title = "UAFix Player"
     page.theme_mode = ft.ThemeMode.LIGHT if ui.LIGHT else ft.ThemeMode.DARK
+    page.fonts = {ui.FONT: "fonts/Manrope.ttf"}
     page.theme = page.dark_theme = ui.theme()
     if TV:
         # підсвітка фокуса там, де її малює сам Flutter (бокове меню): контрастна до теми
@@ -290,7 +293,7 @@ def main(page: ft.Page, reopen=None):
     GOOGLE = False
     if GOOGLE:
         TV_FOCUS_BG = "#15171C" if ui.LIGHT else "#F3F4F6"
-        TV_FOCUS_FG = "#FFFFFF" if ui.LIGHT else "#0D0E12"
+        TV_FOCUS_FG = "#FFFFFF" if ui.LIGHT else "#121212"
         TV_FOCUS_ICON = TV_FOCUS_FG
         focus_ring = TV_FOCUS_BG
     else:
@@ -1274,6 +1277,8 @@ def main(page: ft.Page, reopen=None):
         """TV: перемалювати виділення поточного розділу в меню."""
         if not TV:
             return
+        if st.get("tv_mark_tabs"):
+            st["tv_mark_tabs"]()  # вкладки згори — підсвітити поточний розділ
         drawer.controls = tv_drawer_controls()
         try:
             drawer.update()
@@ -1885,7 +1890,44 @@ def main(page: ft.Page, reopen=None):
                            spacing=4, tight=True, visible=False)
         look_layout()
         st["tv_layout"], st["tv_look_layout"] = tv_layout, look_layout
-        top_bar = ft.Row([menu_btn, title_block, tv_layout, search_btn], spacing=12,
+        # 2.0 «Кінозал»: вкладки розділів у верхньому рядку (меню — для решти розділів)
+        TV_TABS = [("Головна", None), ("Фільми", "/films/"), ("Серіали", "/serials/"),
+                   ("Аніме", "/anime/"), ("Моє", FAV_PATH)]
+
+        def tv_tab(label, path):
+            def go(e):
+                quiet()
+                if path is None:
+                    back_home() if st["mode"][0] != "home" else None
+                else:
+                    page.run_task(open_category, "Обране" if path == FAV_PATH else label, path)
+            sel = (path is None and st["mode"][0] == "home") or \
+                (st["mode"][0] == "cat" and st["mode"][1] == path)
+            return ft.Button(
+                label, on_click=go, data=path,
+                style=ft.ButtonStyle(
+                    bgcolor={ft.ControlState.FOCUSED: "#F2F2F2",
+                             ft.ControlState.DEFAULT: SURFACE_3 if sel else ft.Colors.TRANSPARENT},
+                    color={ft.ControlState.FOCUSED: "#121212",
+                           ft.ControlState.DEFAULT: TEXT if sel else MUTED},
+                    elevation=0, shape=ft.RoundedRectangleBorder(radius=20),
+                    padding=ft.Padding.symmetric(horizontal=20, vertical=12),
+                    text_style=ft.TextStyle(size=16, weight=ft.FontWeight.W_700)))
+
+        tv_tabs = ft.Row([tv_tab(*t) for t in TV_TABS], spacing=4, tight=True)
+
+        def mark_tabs():
+            tv_tabs.controls = [tv_tab(*t) for t in TV_TABS]
+            try:
+                tv_tabs.update()
+            except Exception:
+                pass
+        st["tv_mark_tabs"] = mark_tabs
+        tv_logo = ft.Text(spans=[ft.TextSpan("UAFix", ft.TextStyle(color=TEXT)),
+                                 ft.TextSpan(".", ft.TextStyle(color=ACCENT))],
+                          size=24, weight=ft.FontWeight.W_800)
+        top_bar = ft.Row([menu_btn, tv_logo, ft.Container(width=12), tv_tabs,
+                          ft.Container(expand=True), tv_layout, search_btn], spacing=8,
                          vertical_alignment=ft.CrossAxisAlignment.CENTER)
     else:
         # перетягувати вікно (і розгортати подвійним кліком) — лише за заголовок і порожнє
@@ -1975,6 +2017,106 @@ def main(page: ft.Page, reopen=None):
                             color="#FFFFFF")], spacing=3, tight=True),
             padding=ft.Padding.symmetric(horizontal=7, vertical=3), border_radius=6,
             bgcolor=ft.Colors.with_opacity(0.6, "#000000"), border=ft.Border.all(1, "#22FFFFFF"))
+
+    def poster_swap(box, item):
+        """Вертикальний постер TMDB замість горизонтальної картинки сайту (її — лише якщо
+        постера немає). Відомий — одразу; інакше заглушка, поки TMDB не відповість."""
+        img = box.content if isinstance(getattr(box, "content", None), ft.Image) else None
+        if img is None or not tmdb.enabled() or not item.get("url"):
+            return box
+        known, src = tmdb.poster_cached(item["url"])
+        if known:
+            if src:
+                img.src = src
+            return box
+        img.visible = False
+
+        async def look():
+            src = None
+            try:
+                async with tmdb_slots:
+                    src = await asyncio.wait_for(asyncio.to_thread(
+                        tmdb.poster, item["url"], item.get("title", ""), item.get("orig", ""),
+                        item.get("year", "")), 6)
+            except Exception:
+                pass
+            if src:
+                img.src = src
+            img.visible = True
+            try:
+                img.update()
+            except Exception:
+                pass
+
+        page.run_task(look)
+        return box
+
+    def poster_card(item, caption=None, progress=None, on_open=None, width=None, on_long=None):
+        """2.0 «Кінозал»: вертикальний постер 2:3 з рейтингом, під ним назва й жанри.
+        width — фіксована ширина (поличка, TV); без неї — заповнює клітинку сітки."""
+        open_ = on_open or (lambda: page.run_task(open_title, item))
+        img_h = width * 1.5 if width else None
+        image = poster_swap(ui.poster_image(item["poster"], radius=14,
+                                            cache_width=360 if TV else 400,
+                                            height=img_h, expand=None if width else True),
+                            item)
+        rating_slot = ft.Container(right=8, top=8, visible=False)
+        layers = [image, rating_slot]
+        refs = {}  # підпис і смужка — щоб оновити на місці (див. update_continue_in_place)
+        if progress is not None:
+            refs["progress"] = ft.ProgressBar(value=max(0.02, min(progress, 1)), color=ACCENT,
+                                              bgcolor="#55FFFFFF", bar_height=4, border_radius=2)
+            layers.append(ft.Container(refs["progress"], left=8, right=8, bottom=8))
+        title = ft.Text(item["title"], size=13 if is_mobile else 14, weight=ft.FontWeight.W_700,
+                        color=TEXT, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+        sub = ft.Text(caption or " ", size=12, color=ACCENT if caption else MUTED, max_lines=1,
+                      overflow=ft.TextOverflow.ELLIPSIS)
+        if caption:
+            refs["caption"] = sub
+
+        def show_meta(rating, genres, late=False):
+            if rating:
+                rating_slot.content, rating_slot.visible = rating_badge(rating), True
+            if genres and not caption:
+                sub.value = " · ".join(genres[:2])
+            if late:
+                try:
+                    rating_slot.update()
+                    sub.update()
+                except Exception:
+                    pass
+
+        card_meta(item, show_meta)
+        stack = ft.Stack(layers, height=img_h, expand=None if width else True)
+        ring = ft.Container(stack, border_radius=16, padding=3 if TV else 0,
+                            border=ft.Border.all(3, ft.Colors.TRANSPARENT) if TV else None,
+                            expand=None if width else True)
+        body = ft.Column([ring, ft.Column([title, sub], spacing=0, tight=True)],
+                         spacing=6, tight=bool(width), width=width,
+                         expand=None if width else True)
+        if TV:
+            def lit(f):
+                ring.border = ft.Border.all(3, focus_ring if f else ft.Colors.TRANSPARENT)
+                ring.update()
+                if f and st.get("tv_hero_show"):
+                    st["tv_hero_show"](item)
+            btn = focusable(body, lambda e: open_(), on_focus_change=lit, radius=16)
+            btn.style.side = None
+            if on_long:
+                btn.on_long_press = lambda e: (quiet(), on_long())
+            btn.refs = refs
+            return ui.appear(btn)
+        card = ft.Container(body, on_click=lambda e: open_(), border_radius=16,
+                            scale=1, animate_scale=ui.FAST,
+                            on_long_press=(lambda e: on_long()) if on_long else None)
+        card.refs = refs
+
+        def hover(e):
+            card.scale = 1.04 if ui.hovered(e) else 1
+            card.update()
+        if not is_mobile:
+            card.on_hover = hover
+        return ui.appear(card)
 
     def grid_card(item, progress=None, caption=None, on_open=None, on_remove=None, tv_w=None):
         play = ft.Container(
@@ -2176,7 +2318,7 @@ def main(page: ft.Page, reopen=None):
     pad = ft.Padding.only(left=14, right=14, top=14, bottom=30) if is_mobile else \
         ft.Padding.only(left=24, right=24, top=20, bottom=120 if TV else 40)
     grid = ft.GridView(
-        expand=True, max_extent=420 if is_mobile else 360, child_aspect_ratio=POSTER_RATIO,
+        expand=True, max_extent=135 if is_mobile else 200, child_aspect_ratio=POSTER_CELL,
         spacing=12 if is_mobile else 20, run_spacing=14 if is_mobile else 22, padding=pad,
         on_scroll=on_scroll, scroll_interval=80,
     )
@@ -2198,8 +2340,8 @@ def main(page: ft.Page, reopen=None):
             inner = ft.ListView(tiles, expand=True, spacing=10, padding=pad)
         else:
             tiles = [ft.Container(bgcolor=SURFACE_2, border_radius=14) for _ in range(12)]
-            inner = ft.GridView(tiles, expand=True, max_extent=TV_CARD_W if TV else 420 if is_mobile else 360,
-                                child_aspect_ratio=POSTER_RATIO, spacing=20,
+            inner = ft.GridView(tiles, expand=True, max_extent=190 if TV else 135 if is_mobile else 200,
+                                child_aspect_ratio=POSTER_CELL, spacing=20,
                                 run_spacing=22, padding=pad)
         return shimmer(inner, base_color=SURFACE_2, highlight_color=SURFACE_3, expand=True,
                           key=f"skeleton{st['gen']}")
@@ -2231,7 +2373,7 @@ def main(page: ft.Page, reopen=None):
     body = ft.Container(ft.Container(), expand=True)
 
     def tv_grid_cols():
-        return 4 if (page.width or 960) - 56 >= 840 else 3
+        return 6 if (page.width or 960) - 56 >= 840 else 4
 
     def tv_grid_card_w():
         """TV: картки сітки на всю ширину екрана — 4 в ряд (на вужчому — 3)."""
@@ -2297,7 +2439,8 @@ def main(page: ft.Page, reopen=None):
 
         if st["layout"] == "grid":
             w = tv_grid_card_w() if TV else None
-            cards = [grid_card(it, tv_w=w, caption=caption(it), progress=progress(it))
+            cards = [poster_card(it, width=w - 6 if w else None, caption=caption(it),
+                                 progress=progress(it))
                      for it in items]
         else:
             cards = [list_card(it, caption=caption(it), progress=progress(it)) for it in items]
@@ -2542,7 +2685,7 @@ def main(page: ft.Page, reopen=None):
         primary = ft.ButtonStyle(
             side=focus_side,
             bgcolor={ft.ControlState.HOVERED: "#FFFFFF", ft.ControlState.DEFAULT: "#ECECEC"},
-            color="#0D0E12", icon_color="#0D0E12", shape=ft.RoundedRectangleBorder(radius=12),
+            color="#121212", icon_color="#121212", shape=ft.RoundedRectangleBorder(radius=12),
             padding=ft.Padding.symmetric(horizontal=26, vertical=18),
             text_style=ft.TextStyle(size=15, weight=ft.FontWeight.W_700))
         secondary = ft.ButtonStyle(
@@ -2644,12 +2787,12 @@ def main(page: ft.Page, reopen=None):
             ft.Container(left=0, top=0, right=0, bottom=0, gradient=ft.LinearGradient(
                 begin=ft.Alignment.CENTER_LEFT, end=ft.Alignment.CENTER_RIGHT,
                 # завжди темне (і в світлій темі): білий текст банера лежить на фото
-                colors=[ft.Colors.with_opacity(0.92, "#0D0E12"),
-                        ft.Colors.with_opacity(0.55, "#0D0E12"), "#00000000"],
+                colors=[ft.Colors.with_opacity(0.92, "#121212"),
+                        ft.Colors.with_opacity(0.55, "#121212"), "#00000000"],
                 stops=[0, 0.38, 0.75])),
             ft.Container(left=0, top=0, right=0, bottom=0, gradient=ft.LinearGradient(
                 begin=ft.Alignment.TOP_CENTER, end=ft.Alignment.BOTTOM_CENTER,
-                colors=["#00000000", "#00000000", "#0D0E12" if ui.LIGHT else BG],
+                colors=["#00000000", "#00000000", "#121212" if ui.LIGHT else BG],
                 stops=[0, 0.6, 1])),
             ft.Container(banner_text, left=side, bottom=86,
                          width=None if is_mobile else 640, right=side if is_mobile else None),
@@ -2678,15 +2821,18 @@ def main(page: ft.Page, reopen=None):
                                       on_horizontal_drag_end=swipe_end)
 
     # ── полички під банером
-    shelf_card_w = 220 if is_mobile else TV_CARD_W
+    shelf_card_w = 220 if is_mobile else TV_CARD_W  # широкі картки («Продовжити»)
+    poster_w = 112 if is_mobile else 150 if TV else 160  # постери на поличках
+    poster_row_h = poster_w * 1.5 + 74  # постер + назва + жанри + відступи
 
     def shelf(name, path, block=None):
         row = ft.ListView(
-            horizontal=True, spacing=16, height=shelf_card_w / POSTER_RATIO + 28,
-            padding=ft.Padding.symmetric(horizontal=side, vertical=14),
-            controls=[shimmer(ft.Container(width=shelf_card_w, bgcolor=SURFACE_2, border_radius=14),
-                                 base_color=SURFACE_2, highlight_color=SURFACE_3)
-                      for _ in range(6)])
+            horizontal=True, spacing=12 if is_mobile else 18, height=poster_row_h,
+            padding=ft.Padding.symmetric(horizontal=side, vertical=10),
+            controls=[shimmer(ft.Container(width=poster_w, height=poster_w * 1.5,
+                                           bgcolor=SURFACE_2, border_radius=14),
+                              base_color=SURFACE_2, highlight_color=SURFACE_3)
+                      for _ in range(8)])
 
         async def load():
             try:
@@ -2695,9 +2841,11 @@ def main(page: ft.Page, reopen=None):
                 items = []
             cards = []
             for it in items[:12] if TV else items:  # на TV менше карток — легше для пам'яті
-                c = grid_card(it)
+                c = poster_card(it, width=poster_w)
                 ui.reveal(c)
-                cards.append(ft.Container(c, width=shelf_card_w))
+                cards.append(c)
+            if TV and cards and not tv_first_tile and name == SHELVES[0][0]:
+                tv_first_tile.append(cards[0])  # фокус, коли «Продовжити перегляд» порожній
             if TV and cards:
                 # замість кнопки «Усі» в заголовку (пульт перескакував на неї, і фокус губився) —
                 # остання картка полички
@@ -2706,7 +2854,7 @@ def main(page: ft.Page, reopen=None):
                                ft.Text("Усі", size=20, weight=ft.FontWeight.W_700, color=TEXT)],
                               horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                               alignment=ft.MainAxisAlignment.CENTER, spacing=8),
-                    width=shelf_card_w / 1.6, height=shelf_card_w / POSTER_RATIO,
+                    width=poster_w, height=poster_w * 1.5,
                     bgcolor=SURFACE_2, border_radius=14, border=ft.Border.all(1, BORDER),
                     alignment=ft.Alignment.CENTER),
                     lambda e: page.run_task(open_category, name, path), radius=14))
@@ -2743,14 +2891,15 @@ def main(page: ft.Page, reopen=None):
 
     # без spacing: проміжок — у самому рядку (нижній відступ), щоб при «Прибрати» він
     # стискався разом із рядком
-    continue_list = ft.Column(spacing=0)  # телевізор: «Продовжити перегляд» — списком
+    # TV: ряд постерів (як полички)
+    continue_list = ft.ListView(horizontal=True, spacing=18, height=poster_row_h,
+                                padding=ft.Padding.symmetric(horizontal=side, vertical=10))
     continue_section = ft.Column([
         ft.Container(ft.Row([
             ft.Text("Продовжити перегляд", size=20 if is_mobile else 22,
                     weight=ft.FontWeight.W_800, color=TEXT),
         ]), padding=ft.Padding.symmetric(horizontal=side)),
-        ft.Container(continue_list, padding=ft.Padding.only(left=side, right=side, top=12))
-        if TV else continue_row,
+        continue_list if TV else continue_row,
     ], spacing=0, visible=False)
 
     def update_continue_in_place(items, cards):
@@ -2782,7 +2931,7 @@ def main(page: ft.Page, reopen=None):
     def render_continue(focus=True):
         items = [h for h in history if not h.get("removed") and not watched(h)][:15]
         continue_section.visible = bool(items)
-        urls = [h["url"] for h in items[:6 if TV else 15]]
+        urls = [h["url"] for h in items[:12 if TV else 15]]
         if urls and urls == st.get("continue_urls") and \
                 update_continue_in_place(items, st.get("continue_cards") or []):
             if TV and focus and st.get("continue_cards") and len(page.views) <= 1 \
@@ -2791,35 +2940,34 @@ def main(page: ft.Page, reopen=None):
             return
         st["continue_urls"] = urls
         if TV:
+            # 2.0: ряд постерів зі смужкою «скільки переглянуто»; прибрати — довге натискання OK
+            def ask_remove(h):
+                def go(e):
+                    page.pop_dialog()
+                    remove_from_history(h["url"])
+                show_dialog(ft.AlertDialog(
+                    title=ft.Text("Прибрати з «Продовжити перегляд»?",
+                                  weight=ft.FontWeight.W_800),
+                    bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
+                    content=ft.Text(h.get("title", ""), color=TEXT),
+                    actions=[ft.TextButton("Скасувати", on_click=lambda e: page.pop_dialog(),
+                                           style=ft.ButtonStyle(color=MUTED)),
+                             ft.FilledButton("Прибрати", on_click=go,
+                                             style=ft.ButtonStyle(bgcolor=ACCENT,
+                                                                  color="#FFFFFF"))]))
             cards = [
-                list_card({k: h.get(k, "") for k in ("url", "title", "orig", "poster", "age")},
-                          caption=resume_caption(h),
-                          progress=h["pos"] / h["dur"] if h.get("dur") else None,
-                          autofocus=i == 0,
-                          on_open=lambda h=h: page.run_task(
-                              open_title, {k: h.get(k, "") for k in
-                                           ("url", "title", "orig", "poster", "age")}))
-                for i, h in enumerate(items[:6])]
-            st["continue_cards"] = cards
+                poster_card({k: h.get(k, "") for k in ("url", "title", "orig", "poster", "age")},
+                            caption=resume_caption(h),
+                            progress=h["pos"] / h["dur"] if h.get("dur") else 0,
+                            width=poster_w, on_long=lambda h=h: ask_remove(h),
+                            on_open=lambda h=h: page.run_task(
+                                open_title, {k: h.get(k, "") for k in
+                                             ("url", "title", "orig", "poster", "age")}))
+                for h in items[:12]]
             for c in cards:
-                c.expand = True
-            # праворуч від кожного рядка — «Прибрати» (пультом: стрілка вправо → OK)
-            # рядок — у контейнері, щоб при «Прибрати» плавно стиснути його й сховати
-            continue_list.controls = [
-                ft.Container(ft.Row([c, tv_tap(ft.Container(
-                    ft.Column([ft.Icon(ft.Icons.CLOSE_ROUNDED, size=26),
-                               ft.Text("Прибрати", size=13)],
-                              horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                              alignment=ft.MainAxisAlignment.CENTER, spacing=4),
-                    width=120, height=121, border_radius=14, bgcolor=SURFACE,
-                    border=ft.Border.all(1, BORDER), alignment=ft.Alignment.CENTER),
-                    lambda e, url=h["url"]: remove_from_history(url), radius=14,
-                    focus_bg=(TV_FOCUS_BG, SURFACE))], spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                    data=h["url"], height=131, padding=ft.Padding.only(bottom=10),
-                    opacity=1, animate=ui.MED,
-                    animate_opacity=ui.MED, clip_behavior=ft.ClipBehavior.HARD_EDGE)
-                for c, h in zip(cards, items[:6])]
+                ui.reveal(c)
+            st["continue_cards"] = cards
+            continue_list.controls = cards
             try:
                 continue_section.update()
             except Exception:
@@ -2890,8 +3038,8 @@ def main(page: ft.Page, reopen=None):
 
     # ── нові серії серіалів з Обраного (звіряємо з розділом сайту «Нові серії»)
     fav_new_box = ft.Column(spacing=10) if TV else ft.ListView(
-        horizontal=True, spacing=16, height=shelf_card_w / POSTER_RATIO + 28,
-        padding=ft.Padding.symmetric(horizontal=side, vertical=14))
+        horizontal=True, spacing=12 if is_mobile else 18, height=poster_row_h,
+        padding=ft.Padding.symmetric(horizontal=side, vertical=10))
     fav_new_section = ft.Column([
         ft.Container(ft.Text("Нові серії в обраному", size=20 if is_mobile else 22,
                              weight=ft.FontWeight.W_800, color=TEXT),
@@ -2918,9 +3066,9 @@ def main(page: ft.Page, reopen=None):
         else:
             cards = []
             for it in fresh:
-                c = grid_card(it, caption="Нова серія")
+                c = poster_card(it, caption="Нова серія", width=poster_w)
                 ui.reveal(c)
-                cards.append(ft.Container(c, width=shelf_card_w))
+                cards.append(c)
             fav_new_box.controls = cards
         fav_new_section.visible = bool(fresh)
         try:
@@ -2965,20 +3113,89 @@ def main(page: ft.Page, reopen=None):
                 pass
             pull["busy"] = False
 
+    # ── TV «Кінозал»: угорі — тайтл, на якому зараз курсор пульта (назва, оцінка, кадр)
+    tv_hero_title = ft.Text("", size=44, weight=ft.FontWeight.W_800, color=TEXT, max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS)
+    tv_hero_meta = ft.Text("", size=17, color="#D0D0D0", max_lines=1)
+    tv_hero_sub = ft.Text("", size=15, color=MUTED, max_lines=1)
+    tv_hero_img = ft.Image(src="", fit=ft.BoxFit.COVER, gapless_playback=True, opacity=0,
+                           animate_opacity=ui.MED, expand=True)
+    tv_hero = ft.Container(
+        ft.Stack([
+            ft.Container(tv_hero_img, right=0, top=0, bottom=0, width=760),
+            ft.Container(right=0, top=0, bottom=0, width=760,
+                         gradient=ft.LinearGradient(
+                             begin=ft.Alignment.CENTER_LEFT, end=ft.Alignment.CENTER_RIGHT,
+                             colors=[BG, ft.Colors.with_opacity(0.4, BG), "#00000000"])),
+            ft.Container(right=0, left=0, bottom=0, height=70,
+                         gradient=ft.LinearGradient(
+                             begin=ft.Alignment.BOTTOM_CENTER, end=ft.Alignment.TOP_CENTER,
+                             colors=[BG, "#00000000"])),
+            ft.Container(ft.Column([tv_hero_title, tv_hero_meta, tv_hero_sub], spacing=8,
+                                   tight=True),
+                         left=side, top=26, width=620),
+        ]),
+        height=230 if TV else 0, visible=TV)
+    tv_hero_state = {"url": None, "token": 0}
+
+    def tv_hero_show(item):
+        """Курсор пульта на картці — показати її вгорі (з короткою затримкою: пульт швидко
+        пробігає ряд, і оновлювати на кожному кроці не варто)."""
+        tv_hero_state["token"] += 1
+        page.run_task(tv_hero_apply, item, tv_hero_state["token"])
+
+    async def tv_hero_apply(item, token):
+        await asyncio.sleep(0.18)
+        if token != tv_hero_state["token"] or tv_hero_state["url"] == item.get("url"):
+            return
+        tv_hero_state["url"] = item.get("url")
+        tv_hero_title.value = item.get("title", "")
+        known, m = tmdb.meta_cached(item.get("url", ""))
+        parts = []
+        if m and m.get("rating"):
+            parts.append(f"★ {m['rating']:.1f}")
+        if m and m.get("genres"):
+            parts.append(", ".join(m["genres"][:3]))
+        tv_hero_meta.value = "  ·  ".join(parts)
+        tv_hero_sub.value = item.get("orig", "")
+        known, src = tmdb.cached(item.get("url", ""), "w1280")
+        if not known:
+            try:
+                src = await asyncio.wait_for(asyncio.to_thread(
+                    tmdb.backdrop, item["url"], item.get("title", ""), item.get("orig", ""),
+                    item.get("year", "")), 4)
+            except Exception:
+                src = None
+            if token != tv_hero_state["token"]:
+                return
+        src = src or item.get("poster") or ""
+        if src != tv_hero_img.src:
+            tv_hero_img.src, tv_hero_img.opacity = src, 1 if src else 0
+        try:
+            tv_hero.update()
+        except Exception:
+            pass
+
+    st["tv_hero_show"] = tv_hero_show if TV else None
+
     home_content = ft.ListView(
-        [continue_section, fav_new_section, tv_sections(), ft.Container(height=120)] if TV else
+        [continue_section, fav_new_section, *[col for col, _ in shelves],
+         ft.Container(height=120)] if TV else
         [*([refresh_ring] if is_mobile else []), banner_swipe, continue_section,
          fav_new_section, *[col for col, _ in shelves], ft.Container(height=40)],
         expand=True, spacing=18 if not TV else 28,
         on_scroll=home_scroll if is_mobile else None,
-        padding=ft.Padding.only(top=20) if TV else 0, key="home")
+        padding=ft.Padding.only(top=6) if TV else 0, key="home")
+    # TV: блок з тайтлом під курсором — закріплений угорі, ряди прокручуються під ним
+    home_view = ft.Column([tv_hero, home_content], expand=True, spacing=0) if TV \
+        else home_content
 
     async def load_home():
         hero["loaded"] = True
-        if TV:
-            return  # на телевізорі головна нічого не завантажує
         for _, load in shelves:
             page.run_task(load)
+        if TV:
+            return  # на телевізорі банера немає — лише полички
         try:
             items = await asyncio.to_thread(core.featured)
         except Exception as ex:
@@ -3008,7 +3225,7 @@ def main(page: ft.Page, reopen=None):
         cat_back.visible = False
         if st.get("tv_layout"):
             st["tv_layout"].visible = False
-        body.content = home_content
+        body.content = home_view
         page.update()
         if not hero["loaded"]:
             page.run_task(load_home)
@@ -4084,8 +4301,8 @@ def main(page: ft.Page, reopen=None):
             return ft.ButtonStyle(
                 bgcolor={ft.ControlState.DISABLED: SURFACE_3, ft.ControlState.HOVERED: "#FFFFFF",
                          ft.ControlState.DEFAULT: "#ECECEC"},
-                color={ft.ControlState.DISABLED: MUTED, ft.ControlState.DEFAULT: "#0D0E12"},
-                icon_color={ft.ControlState.DISABLED: MUTED, ft.ControlState.DEFAULT: "#0D0E12"},
+                color={ft.ControlState.DISABLED: MUTED, ft.ControlState.DEFAULT: "#121212"},
+                icon_color={ft.ControlState.DISABLED: MUTED, ft.ControlState.DEFAULT: "#121212"},
                 shape=ft.RoundedRectangleBorder(radius=12),
                 padding=ft.Padding.symmetric(horizontal=pad, vertical=18),
                 text_style=ft.TextStyle(size=15, weight=ft.FontWeight.W_700),

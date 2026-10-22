@@ -13,17 +13,18 @@ if LIGHT:
     BORDER = "#1F000000"
     TEXT = "#15171C"
     MUTED = "#5F6672"
-    ACCENT = "#EE5A2C"  # трохи темніший — контрастніший на білому
+    ACCENT = "#D9452F"  # трохи темніший — контрастніший на білому
 else:
-    BG = "#0D0E12"
-    SURFACE = "#15171C"
-    SURFACE_2 = "#1C1F26"
-    SURFACE_3 = "#262A33"
+    # 2.0 «Кінозал»: графіт і корал
+    BG = "#121212"
+    SURFACE = "#1A1A1A"
+    SURFACE_2 = "#1E1E1E"
+    SURFACE_3 = "#2A2A2A"
     BORDER = "#14FFFFFF"
-    TEXT = "#F3F4F6"
-    MUTED = "#9BA1AC"
-    ACCENT = "#FF6A3D"
-ACCENT_2 = "#FFB547"
+    TEXT = "#F2F2F2"
+    MUTED = "#A3A3A3"
+    ACCENT = "#E5533D"
+ACCENT_2 = "#FF8A6B"
 GOLD = "#F5C518"
 
 EASE = ft.AnimationCurve.EASE_OUT_CUBIC
@@ -39,8 +40,12 @@ ACCENT_GRADIENT = ft.LinearGradient(
     begin=ft.Alignment.TOP_LEFT, end=ft.Alignment.BOTTOM_RIGHT, colors=[ACCENT_2, ACCENT])
 
 
+FONT = "Manrope"  # assets/fonts/Manrope.ttf (SIL OFL), реєструється в main через page.fonts
+
+
 def theme():
     return ft.Theme(
+        font_family=FONT,
         color_scheme_seed=ACCENT,
         # surface_tint прозорий: Material 3 інакше домішує оранжевий до фону меню й вікон
         color_scheme=ft.ColorScheme(primary=ACCENT, surface=BG, on_surface=TEXT,
