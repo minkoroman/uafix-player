@@ -2699,6 +2699,10 @@ def main(page: ft.Page, reopen=None):
             color="#FFFFFF", icon_color="#FFFFFF", shape=ft.RoundedRectangleBorder(radius=12),
             padding=ft.Padding.symmetric(horizontal=22, vertical=18),
             text_style=ft.TextStyle(size=15, weight=ft.FontWeight.W_600))
+        # expand лише на телефоні (ряд без переносу): у ряду з переносом (ПК, TV) навіть
+        # expand=False обгортає кнопку в Flexible — Flutter це забороняє, і замість усього
+        # тексту банера був сірий прямокутник
+        stretch = {"expand": True} if is_mobile else {}
         return ft.Column([
             ft.Text(("Новинка · " + kind if kind else "Новинка").upper(), size=12,
                     weight=ft.FontWeight.W_800, color=ACCENT),
@@ -2714,10 +2718,10 @@ def main(page: ft.Page, reopen=None):
             ft.Row([
                 ft.FilledButton("Дивитись", icon=ft.Icons.PLAY_ARROW_ROUNDED, style=primary,
                                 autofocus=TV and not hero.get("autofocused"),
-                                on_focus=banner_focus, on_blur=banner_blur, expand=is_mobile,
+                                on_focus=banner_focus, on_blur=banner_blur, **stretch,
                                 on_click=lambda e: page.run_task(open_title, item, True)),
                 ft.FilledButton("Детальніше", icon=ft.Icons.INFO_OUTLINE_ROUNDED, style=secondary,
-                                on_focus=banner_focus, on_blur=banner_blur, expand=is_mobile,
+                                on_focus=banner_focus, on_blur=banner_blur, **stretch,
                                 on_click=lambda e: page.run_task(open_title, item)),
             ], spacing=12, wrap=not is_mobile),
         ], spacing=8, tight=True, key=f"txt{item['url']}")
