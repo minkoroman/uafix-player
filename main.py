@@ -196,9 +196,13 @@ def main(page: ft.Page, reopen=None):
     # телевізор — Android, але з розміткою «як на ПК» і керуванням з пульта
     # на Android TV Flet повідомляє окрему платформу ANDROID_TV — для нас це той самий Android
     is_android = page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.ANDROID_TV)
-    is_mobile = page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS) and not TV
+    # UAFIX_MOBILE=1 — перевірити вигляд телефона на ПК (вузьке вікно)
+    is_mobile = (page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS) or
+                 os.environ.get("UAFIX_MOBILE") == "1") and not TV
     is_desktop = page.platform in (ft.PagePlatform.MACOS, ft.PagePlatform.WINDOWS,
-                                   ft.PagePlatform.LINUX)
+                                   ft.PagePlatform.LINUX) and not is_mobile
+    if is_mobile and os.environ.get("UAFIX_MOBILE") == "1":
+        page.window.width, page.window.height = 400, 860
     if is_desktop and first:
         page.window.width, page.window.height = 1240, 800
         page.window.min_width, page.window.min_height = 760, 540
@@ -425,7 +429,7 @@ def main(page: ft.Page, reopen=None):
 
     accel = ft.Accelerometer(
         enabled=False, interval=ft.Duration(milliseconds=400),
-        on_reading=on_reading) if is_mobile else None
+        on_reading=on_reading) if is_mobile and is_android else None
     # fit "auto": на телефоні в повному екрані — «Заповнити»; quality: "1080" / "720" / "480"
     settings = {"sub_scale": 1.0, "fit": "auto", "skipped_version": "",
                 "auto_updates": True, "keep_history": True, "quality": "1080",
@@ -2698,7 +2702,7 @@ def main(page: ft.Page, reopen=None):
         return ft.Column([
             ft.Text(("Новинка · " + kind if kind else "Новинка").upper(), size=12,
                     weight=ft.FontWeight.W_800, color=ACCENT),
-            ft.Text(info.get("title") or item["title"], size=30 if is_mobile else 54,
+            ft.Text(info.get("title") or item["title"], size=40 if is_mobile else 54,
                     weight=ft.FontWeight.W_800, color="#FFFFFF", max_lines=2,
                     overflow=ft.TextOverflow.ELLIPSIS),
             ft.Text(orig, size=16, color="#C9CDD4", visible=bool(orig)),
@@ -2710,18 +2714,18 @@ def main(page: ft.Page, reopen=None):
             ft.Row([
                 ft.FilledButton("Дивитись", icon=ft.Icons.PLAY_ARROW_ROUNDED, style=primary,
                                 autofocus=TV and not hero.get("autofocused"),
-                                on_focus=banner_focus, on_blur=banner_blur,
+                                on_focus=banner_focus, on_blur=banner_blur, expand=is_mobile,
                                 on_click=lambda e: page.run_task(open_title, item, True)),
                 ft.FilledButton("Детальніше", icon=ft.Icons.INFO_OUTLINE_ROUNDED, style=secondary,
-                                on_focus=banner_focus, on_blur=banner_blur,
+                                on_focus=banner_focus, on_blur=banner_blur, expand=is_mobile,
                                 on_click=lambda e: page.run_task(open_title, item)),
-            ], spacing=12, wrap=True),
+            ], spacing=12, wrap=not is_mobile),
         ], spacing=8, tight=True, key=f"txt{item['url']}")
 
     def render_dots():
         dots.controls = [
             ft.Container(width=28 if i == hero["i"] else 8, height=8, border_radius=4,
-                         bgcolor="#FFFFFF" if i == hero["i"]
+                         bgcolor=ACCENT if i == hero["i"]
                          else ft.Colors.with_opacity(0.4, "#FFFFFF"),
                          animate=ui.MED, on_click=lambda e, i=i: page.run_task(show_slide, i))
             for i in range(len(hero["items"]))]
@@ -3113,6 +3117,53 @@ def main(page: ft.Page, reopen=None):
                 pass
             pull["busy"] = False
 
+    # ── «Топ тижня» (TMDB, лише те, що є на сайті): великі цифри поруч із постерами
+    top_row = ft.ListView(horizontal=True, spacing=6 if is_mobile else 10, height=poster_row_h,
+                          padding=ft.Padding.symmetric(horizontal=side, vertical=10))
+    top_section = ft.Column([
+        ft.Container(ft.Text("Топ тижня", size=20 if is_mobile else 22,
+                             weight=ft.FontWeight.W_800, color=TEXT),
+                     padding=ft.Padding.symmetric(horizontal=side)),
+        top_row,
+    ], spacing=0, visible=False)
+
+    async def load_top():
+        try:
+            trend = await asyncio.to_thread(tmdb.trending_week, 20)
+            sem = asyncio.Semaphore(4)
+
+            async def find(x):
+                async with sem:
+                    return await asyncio.to_thread(core.find_any_title, x["orig"], x["title"],
+                                                   x["kind"])
+            found = await asyncio.gather(*[find(x) for x in trend], return_exceptions=True)
+        except Exception:
+            return
+        items = [f for f in found if isinstance(f, dict)][:10]
+        if len(items) < 3:
+            return
+        num_size = poster_w * 0.95
+        row = []
+        for n, it in enumerate(items, 1):
+            number = ft.Text(str(n), size=num_size, weight=ft.FontWeight.W_800,
+                             style=ft.TextStyle(height=1.0, foreground=ft.Paint(
+                                 color="#8C8C8C", stroke_width=2,
+                                 style=ft.PaintingStyle.STROKE)))
+            card = poster_card(it, width=poster_w)
+            ui.reveal(card)
+            # цифра трохи заходить під постер (Stack, без від'ємних відступів)
+            num_w = num_size * (0.62 if n < 10 else 1.15)
+            row.append(ft.Stack([
+                ft.Container(number, left=0, top=poster_w * 1.5 - num_size * 0.92),
+                ft.Container(card, left=num_w - 12, top=0),
+            ], width=num_w - 12 + poster_w, height=poster_row_h - 20))
+        top_row.controls = row
+        top_section.visible = True
+        try:
+            top_section.update()
+        except Exception:
+            pass
+
     # ── TV «Кінозал»: угорі — тайтл, на якому зараз курсор пульта (назва, оцінка, кадр)
     tv_hero_title = ft.Text("", size=44, weight=ft.FontWeight.W_800, color=TEXT, max_lines=1,
                             overflow=ft.TextOverflow.ELLIPSIS)
@@ -3179,10 +3230,10 @@ def main(page: ft.Page, reopen=None):
     st["tv_hero_show"] = tv_hero_show if TV else None
 
     home_content = ft.ListView(
-        [continue_section, fav_new_section, *[col for col, _ in shelves],
+        [continue_section, fav_new_section, top_section, *[col for col, _ in shelves],
          ft.Container(height=120)] if TV else
         [*([refresh_ring] if is_mobile else []), banner_swipe, continue_section,
-         fav_new_section, *[col for col, _ in shelves], ft.Container(height=40)],
+         fav_new_section, top_section, *[col for col, _ in shelves], ft.Container(height=40)],
         expand=True, spacing=18 if not TV else 28,
         on_scroll=home_scroll if is_mobile else None,
         padding=ft.Padding.only(top=6) if TV else 0, key="home")
@@ -3194,6 +3245,7 @@ def main(page: ft.Page, reopen=None):
         hero["loaded"] = True
         for _, load in shelves:
             page.run_task(load)
+        page.run_task(load_top)
         if TV:
             return  # на телевізорі банера немає — лише полички
         try:
@@ -4246,14 +4298,17 @@ def main(page: ft.Page, reopen=None):
         )
 
         poster = ft.Container(
-            tmdb_swap(ui.poster_image(item["poster"], radius=18, aspect_ratio=POSTER_RATIO),
+            tmdb_swap(ui.poster_image(item["poster"], radius=0 if is_mobile else 18,
+                                      aspect_ratio=POSTER_RATIO),
                       item, "w1280"),
-            border_radius=18,
-            shadow=ft.BoxShadow(blur_radius=50, offset=ft.Offset(0, 24),
-                                color=ft.Colors.with_opacity(0.6, "#000000")),
-            scale=0.92, animate_scale=ui.SLOW,
+            border_radius=0 if is_mobile else 18,
+            # телефон: кадр на всю ширину, без тіні й рамки (2.0 «Кінозал»)
+            shadow=None if is_mobile else ft.BoxShadow(
+                blur_radius=50, offset=ft.Offset(0, 24),
+                color=ft.Colors.with_opacity(0.6, "#000000")),
+            scale=1 if is_mobile else 0.92, animate_scale=ui.SLOW,
         )
-        title = ft.Text(item["title"], size=26 if is_mobile else 36, weight=ft.FontWeight.W_800,
+        title = ft.Text(item["title"], size=28 if is_mobile else 36, weight=ft.FontWeight.W_800,
                         color=TEXT)
         orig = ft.Text(item["orig"], size=16, color=MUTED, visible=bool(item["orig"]))
         meta_row = ft.Row([ui.pill(item["age"])] if item["age"] else [], spacing=8, wrap=True)
@@ -4383,8 +4438,16 @@ def main(page: ft.Page, reopen=None):
         ctx["voice_row"] = voice_row
         ctx["voice_box"] = voice_box
 
-        actions_row = ft.Row([resume_btn, play_btn, fav_btn, trailer_btn, site_btn],
-                             spacing=10 if not TV else 12, wrap=True, run_spacing=12)
+        if is_mobile:
+            # 2.0 «Кінозал»: головна дія — на всю ширину, решта — рядком нижче
+            resume_btn.expand = play_btn.expand = True
+            actions_row = ft.Column([
+                ft.Row([resume_btn, play_btn], spacing=10),
+                ft.Row([fav_btn, trailer_btn], spacing=10, wrap=True, run_spacing=10),
+            ], spacing=10)
+        else:
+            actions_row = ft.Row([resume_btn, play_btn, fav_btn, trailer_btn, site_btn],
+                                 spacing=10 if not TV else 12, wrap=True, run_spacing=12)
         if TV:
             # курсор на кнопках під постером — сторінка вгору: видно постер і опис (самі вони
             # фокус не отримують, тож інакше пульт стрибав одразу на «Назад»)
@@ -4406,14 +4469,18 @@ def main(page: ft.Page, reopen=None):
         ], spacing=6), padding=ft.Padding.only(top=8)))
 
         poster_col = ft.Column(
-            [poster, *([ft.Container(actions_row, padding=ft.Padding.only(top=20))] if TV else [])],
+            [*([] if is_mobile else [poster]),
+             *([ft.Container(actions_row, padding=ft.Padding.only(top=20))] if TV else [])],
             spacing=0)
-        hero = ft.ResponsiveRow([
-            ft.Container(poster_col,
-                         col={"xs": 12, "md": 6, "lg": 5},
-                         alignment=ft.Alignment.CENTER if is_mobile else ft.Alignment.TOP_LEFT),
-            ft.Container(hero_info, col={"xs": 12, "md": 6, "lg": 7}),
-        ], spacing=36, run_spacing=24)
+        if is_mobile:  # кадр — окремо, на всю ширину екрана (див. content нижче)
+            hero = hero_info
+        else:
+            hero = ft.ResponsiveRow([
+                ft.Container(poster_col,
+                             col={"xs": 12, "md": 6, "lg": 5},
+                             alignment=ft.Alignment.TOP_LEFT),
+                ft.Container(hero_info, col={"xs": 12, "md": 6, "lg": 7}),
+            ], spacing=36, run_spacing=24)
 
         # ── блок серій
         ep_status = ft.Text("Шукаю серії…", size=13, color=MUTED)
@@ -4472,6 +4539,8 @@ def main(page: ft.Page, reopen=None):
             padding=ft.Padding.only(left=side_pad, right=side_pad, top=8 if is_mobile else 16,
                                     bottom=60),
         )
+        if is_mobile:
+            content = ft.Column([poster, content], spacing=0)
         # верхня панель — окрема смуга над контентом (зображення під «світлофор» і кнопку
         # «Назад» не заїжджає); після прокрутки в ній з'являється назва й нижня межа
         bar_title = ft.Text(item["title"], size=15, weight=ft.FontWeight.W_700, color=TEXT,

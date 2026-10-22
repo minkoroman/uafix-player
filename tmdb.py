@@ -376,3 +376,22 @@ def collection(url, title, orig="", year=""):
 def _today():
     import datetime
     return datetime.date.today().isoformat()
+
+
+# ───────── топ тижня ─────────
+
+def trending_week(limit=20):
+    """Найпопулярніше за тиждень (фільми й серіали): [{title, orig, year, kind}]."""
+    if not TMDB_TOKEN:
+        return []
+    out = []
+    for r in _get("/trending/all/week", language="uk-UA").get("results", []):
+        if r.get("media_type") not in ("movie", "tv"):
+            continue
+        date = r.get("release_date") or r.get("first_air_date") or ""
+        out.append({"title": r.get("title") or r.get("name") or "",
+                    "orig": r.get("original_title") or r.get("original_name") or "",
+                    "year": date[:4], "kind": r["media_type"]})
+        if len(out) >= limit:
+            break
+    return out

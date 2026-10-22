@@ -445,6 +445,23 @@ def _norm_title(s):
     return re.sub(r"[^\w]+", " ", (s or "").lower()).strip()
 
 
+def find_any_title(orig, title="", kind="movie"):
+    """Як find_title, але й для серіалів (kind="tv")."""
+    for q, key in ((orig, "orig"), (title, "title")):
+        if not q:
+            continue
+        want = _norm_title(q)
+        try:
+            items = parse_catalog(fetch(search_url(q, 1)))
+        except Exception:
+            continue
+        for it in items:
+            serial = "/serials/" in it["url"] or "/anime/" in it["url"]
+            if (kind == "tv") == serial and _norm_title(it[key]) == want:
+                return it
+    return None
+
+
 def find_title(orig, title=""):
     """Тайтл на сайті за назвою з TMDB: спершу шукаємо за оригінальною (переклад назви на
     сайті й у TMDB часто різний), збіг — за точною назвою. → картка або None."""
