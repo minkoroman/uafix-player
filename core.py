@@ -652,9 +652,34 @@ def _page_streams(url, label=(), html=None):
         found = [{"path": label + p if p else label, "url": l, "referer": url,
                   "voice": voice_name("", l), "subs": subs}
                  for p, l, subs in parse_player(html)]
-    if GEO["site"] or GEO["blocked"]:  # за кордоном — без серверів, що сюди відео не віддають
-        found = [f for f in found if cdn_ok(f["url"], f["referer"])]
+    if GEO["site"] or GEO["blocked"]:
+        # за кордоном: відео серверів, що сюди його не віддають, — через Tor (hls_proxy),
+        # а якщо Tor немає — без них
+        kept = []
+        for f in found:
+            if cdn_ok(f["url"], f["referer"]):
+                kept.append(f)
+            elif ABROAD["enabled"] and ABROAD.get("get_proxy") and ABROAD["get_proxy"]():
+                import hls_proxy
+                kept.append(dict(f, url=hls_proxy.wrap(f["url"], f["referer"])))
+        found = kept
     return html, found
+
+
+def abroad_get(url, referer, range_header=None):
+    """Відповідь відеосервера через Tor з українським виходом (для hls_proxy)."""
+    base = ABROAD["get_proxy"]() if ABROAD.get("get_proxy") else None
+    if not base:
+        raise RuntimeError("Tor недоступний")
+    proxy = base.replace("://", "://video:x@", 1)  # один маршрут на все відео
+    h = dict(HEADERS)
+    if referer:
+        p = urlparse(referer)
+        h.update(Referer=referer, Origin=f"{p.scheme}://{p.netloc}")
+    if range_header:
+        h["Range"] = range_header
+    return _session.get(url, headers=h, timeout=40, proxies={"http": proxy, "https": proxy},
+                        **IMPERSONATE)
 
 
 DIAG_URLS = ["https://uafix.net/", "https://ashdi.vip/", "https://zetvideo.net/",
