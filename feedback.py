@@ -22,8 +22,9 @@ def enabled():
     return bool(FEEDBACK_BOT_TOKEN and FEEDBACK_CHAT_ID)
 
 
-def send(kind, text, signature):
-    """Надсилає повідомлення; signature — «UAFix Player 1.2.3 · android (TV)…».
+def send(kind, text, signature, attachment=None):
+    """Надсилає повідомлення; signature — «UAFix Player 1.2.3 · android (TV)…»;
+    attachment — (ім'я.txt, текст) діагностики, окремим файлом слідом.
     Помилки — ValueError зі зрозумілим текстом."""
     if not enabled():
         raise ValueError("Відправка звітів не налаштована в цій версії")
@@ -45,4 +46,12 @@ def send(kind, text, signature):
         raise ValueError("Не вдалося надіслати — немає зв'язку з Telegram")
     if not ok:
         raise ValueError("Telegram не прийняв повідомлення")
+    if attachment:  # повідомлення вже пішло — без файлу теж нормально
+        try:
+            requests.post(f"https://api.telegram.org/bot{FEEDBACK_BOT_TOKEN}/sendDocument",
+                          data={"chat_id": FEEDBACK_CHAT_ID},
+                          files={"document": (attachment[0], attachment[1].encode("utf-8"))},
+                          timeout=30)
+        except Exception:
+            pass
     _last[0] = time.monotonic()

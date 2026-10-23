@@ -517,6 +517,8 @@ def main(page: ft.Page, reopen=None):
             apply_layout_default()
             core.ABROAD["enabled"] = bool(settings.get("abroad", True))
             core.ABROAD["get_proxy"] = tor_proxy
+            if not is_android:  # старі версії Tor і запасні теки даних
+                page.run_thread(tor_runner.cleanup_old)
         except Exception:
             pass
         render_continue()
@@ -3249,8 +3251,17 @@ def main(page: ft.Page, reopen=None):
         async def submit(e):
             send_btn.disabled, sending.visible = True, True
             dlg.update()
+            attach = None
+            if geo_note() or tor_runner.last_error():  # проблеми з регіоном — додаємо діагностику
+                def diag():
+                    return ("uafix-diagnostics.txt",
+                            f"{signature}\n\n{core.diagnostics(tor_runner.current_proxy())}\n\n"
+                            f"--- Tor ({tor_runner.last_error() or 'без помилки'}) ---\n"
+                            f"{tor_runner.log_tail()}")
+                attach = await asyncio.to_thread(diag)
             try:
-                await asyncio.to_thread(feedback.send, kind["value"], text.value, signature)
+                await asyncio.to_thread(feedback.send, kind["value"], text.value, signature,
+                                        attach)
             except ValueError as ex:
                 send_btn.disabled, sending.visible = False, False
                 dlg.update()
@@ -4005,7 +4016,9 @@ def main(page: ft.Page, reopen=None):
         return (f" · регіон обмежено (сайт: {'так' if g['site'] else 'ні'}, ashdi: "
                 f"{'так' if g['blocked'] else 'ні'}, обхід: "
                 f"{'вимкнено' if not a['enabled'] else 'Tor ' + ('є' if a.get('circuit') else 'немає')}"
-                f"{' — ' + tor_runner.last_error() if tor_runner.last_error() else ''})")
+                f"{' — ' + tor_runner.last_error() if tor_runner.last_error() else ''}"
+                f"{'; остання спроба: ' + a['last'] if a.get('last') else ''}"
+                f"{'; без відео з: ' + ', '.join(h for h, ok in g['cdn'].items() if not ok) if not all(g['cdn'].values()) else ''})")
 
     async def abroad_hint(loading):
         """Перший фільм в обхід регіональних обмежень відкривається довше (запуск Tor) —
@@ -4389,6 +4402,8 @@ def main(page: ft.Page, reopen=None):
                     ft.Icons.PUBLIC_OFF_ROUNDED, "Недоступно у вашому регіоні",
                     "Увімкніть «Обхід регіональних обмежень» у налаштуваннях"
                     if not core.ABROAD["enabled"] else
+                    "Відеосервер цього фільму не віддає відео за кордон"
+                    if core.ABROAD.get("circuit") and not all(core.GEO["cdn"].values()) else
                     "Не вдалося підключитися в обхід обмежень. Спробуйте трохи пізніше")
             else:
                 episodes_box.content = empty_state(ft.Icons.VIDEOCAM_OFF_ROUNDED,

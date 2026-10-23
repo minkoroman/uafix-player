@@ -17,6 +17,7 @@ import sys
 import tarfile
 import threading
 import time
+from collections import deque
 
 import requests
 
@@ -34,7 +35,8 @@ ONIONOO = ("https://onionoo.torproject.org/details?search=country:ua%20flag:exit
            "&running=true&fields=fingerprint")
 ANDROID_PORT = 19050  # той самий порт пише в torrc MainActivity
 
-_state = {"proxy": None, "proc": None, "error": "", "exits": []}
+# log — останні рядки виводу Tor (ПК) або кроки запуску (Android) — для звіту про проблему
+_state = {"proxy": None, "proc": None, "error": "", "exits": [], "log": deque(maxlen=40)}
 _lock = threading.Lock()
 
 
@@ -57,12 +59,30 @@ def last_error():
     return _state["error"]
 
 
+def _log(line):
+    _state["log"].append(f"{time.strftime('%H:%M:%S')} {line.rstrip()}")
+
+
+def current_proxy():
+    """Адреса вже запущеного Tor (без запуску) або None."""
+    return _state["proxy"]
+
+
+def log_tail():
+    """Останні ~40 рядків логу Tor — для звіту про проблему."""
+    return "\n".join(_state["log"])
+
+
 def ua_exits():
     """Відбитки вихідних вузлів Tor в Україні (кеш на годину)."""
     if _state["exits"] and time.time() - _state.get("exits_at", 0) < 3600:
         return _state["exits"]
-    r = requests.get(ONIONOO, timeout=20)
-    r.raise_for_status()
+    try:
+        r = requests.get(ONIONOO, timeout=20)
+        r.raise_for_status()
+    except Exception as ex:
+        _log(f"onionoo: {type(ex).__name__} {str(ex)[:120]}")
+        raise RuntimeError("Не вдалося отримати список вузлів Tor (onionoo.torproject.org)")
     fps = [x["fingerprint"] for x in r.json().get("relays", []) if x.get("fingerprint")]
     if fps:
         _state["exits"], _state["exits_at"] = fps, time.time()
@@ -98,12 +118,17 @@ def _ensure_binary():
     os.makedirs(root, exist_ok=True)
     tmp = os.path.join(root, name + ".part")
     digest = hashlib.sha256()
-    with requests.get(ARCHIVE.format(v=TOR_VERSION, name=name), stream=True, timeout=60) as r:
-        r.raise_for_status()
-        with open(tmp, "wb") as f:
-            for chunk in r.iter_content(256 * 1024):
-                f.write(chunk)
-                digest.update(chunk)
+    try:
+        with requests.get(ARCHIVE.format(v=TOR_VERSION, name=name), stream=True,
+                          timeout=60) as r:
+            r.raise_for_status()
+            with open(tmp, "wb") as f:
+                for chunk in r.iter_content(256 * 1024):
+                    f.write(chunk)
+                    digest.update(chunk)
+    except Exception as ex:
+        _log(f"archive: {type(ex).__name__} {str(ex)[:120]}")
+        raise RuntimeError("Не вдалося завантажити Tor (archive.torproject.org)")
     if digest.hexdigest() != sha:
         os.remove(tmp)
         raise RuntimeError("Завантажений Tor не пройшов перевірку")
@@ -131,54 +156,85 @@ def _clean_env():
     return {k: v for k, v in os.environ.items() if not k.startswith("FLET_")}
 
 
+class _DataDirBusy(Exception):
+    pass
+
+
 def _start_desktop():
     exe = _ensure_binary()
     exits = ua_exits()
     if not exits:
         raise RuntimeError("Немає доступних вихідних вузлів")
+    try:
+        return _run_desktop(exe, exits, "data")
+    except _DataDirBusy:
+        # теку тримає Tor, що лишився від попереднього запуску (застосунок закрили так, що
+        # прибрати не встигли), — запускаємо поруч з окремою текою, той процес не чіпаємо
+        return _run_desktop(exe, exits, f"data-{os.getpid()}")
+
+
+def _run_desktop(exe, exits, data_name):
     port = _free_port()
-    data = os.path.join(_base_dir(), "data")
+    data = os.path.join(_base_dir(), data_name)
     os.makedirs(data, exist_ok=True)
     torrc = os.path.join(_base_dir(), "torrc")
     with open(torrc, "w", encoding="utf-8") as f:
+        # __OwningControllerProcess — Tor сам завершиться, щойно не стане застосунку
         f.write(f"SocksPort 127.0.0.1:{port}\nDataDirectory {data}\n"
                 f"ExitNodes {','.join('$' + x for x in exits)}\nStrictNodes 1\n"
-                "ClientOnly 1\nAvoidDiskWrites 1\n")
+                f"ClientOnly 1\nAvoidDiskWrites 1\n__OwningControllerProcess {os.getpid()}\n")
     kw = {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "text": True,
-          "env": _clean_env(), "cwd": os.path.dirname(exe)}
+          "encoding": "utf-8", "errors": "replace", "env": _clean_env(),
+          "cwd": os.path.dirname(exe)}
     if sys.platform == "win32":
         kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
     proc = subprocess.Popen([exe, "-f", torrc], **kw)
     _state["proc"] = proc
+    _log(f"tor {TOR_VERSION}, pid {proc.pid}, вихідних вузлів: {len(exits)}, тека: {data_name}")
     import atexit
     atexit.register(stop)  # Tor не лишається працювати після закриття застосунку
     deadline = time.time() + 120
+    busy = False
     for line in proc.stdout:
+        _log(line)
         if "Bootstrapped 100%" in line:
-            threading.Thread(target=lambda: [None for _ in proc.stdout], daemon=True).start()
+            threading.Thread(target=lambda: [_log(x) for x in proc.stdout], daemon=True).start()
             return f"socks5h://127.0.0.1:{port}"
+        busy = busy or "another Tor process is running" in line
         if time.time() > deadline:
             break
     proc.kill()
+    _log(f"Tor зупинено, код виходу {proc.wait()}")
+    if busy and data_name == "data":
+        raise _DataDirBusy()
     raise RuntimeError("Tor не підключився")
 
 
 def _start_android(launch):
     """launch(fingerprints) — попросити MainActivity запустити вбудований Tor."""
+    t0 = time.time()
     if not _port_open(ANDROID_PORT):
-        launch(ua_exits())
+        exits = ua_exits()
+        _log(f"запуск вбудованого Tor, вихідних вузлів: {len(exits)}")
+        launch(exits)
     deadline = time.time() + 120
+    seen_port = False
     while time.time() < deadline:
         if _port_open(ANDROID_PORT):
+            if not seen_port:
+                seen_port = True
+                _log(f"порт {ANDROID_PORT} відкрито за {time.time() - t0:.0f} с")
             # порт відкрито раніше, ніж Tor збудує ланцюжок, — перевіряємо реальним запитом
             try:
                 requests.get("https://check.torproject.org/api/ip", timeout=20, proxies={
                     "http": f"socks5h://127.0.0.1:{ANDROID_PORT}",
                     "https": f"socks5h://127.0.0.1:{ANDROID_PORT}"})
+                _log(f"Tor готовий за {time.time() - t0:.0f} с")
                 return f"socks5h://127.0.0.1:{ANDROID_PORT}"
             except Exception:
                 pass
         time.sleep(2)
+    _log(f"не готовий за {time.time() - t0:.0f} с (порт {'відкрито' if seen_port else 'закрито'})")
     raise RuntimeError("Tor не підключився")
 
 
@@ -217,5 +273,7 @@ def cleanup_old():
     """Прибрати старі версії Tor після оновлення."""
     base = _base_dir()
     for d in os.listdir(base):
-        if d[:1].isdigit() and d != TOR_VERSION:
+        # і запасні теки даних від запусків, коли основну тримав старий Tor
+        if (d[:1].isdigit() and d != TOR_VERSION) or \
+                (d.startswith("data-") and d != f"data-{os.getpid()}"):
             shutil.rmtree(os.path.join(base, d), ignore_errors=True)

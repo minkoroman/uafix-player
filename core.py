@@ -1,6 +1,7 @@
 """Мережа і парсинг uafix.net (спільне ядро для всіх платформ)."""
 import json
 import re
+import threading
 import time
 from urllib.parse import urljoin, urlparse, quote_plus
 
@@ -40,12 +41,18 @@ _session = http.Session() if hasattr(http, "Session") else http
 # країну перегляду», а плеєр ashdi — «Змініть країну перегляду» (саме відео доступне
 # звідусіль). Тоді сторінку з плеєром (кілька КБ) беремо через мережу Tor із вихідними
 # вузлами в Україні (tor_runner.py); каталог і відео — напряму.
-GEO = {"blocked": False, "site": False}
+# Але не всі відеосервери однакові: ashdi віддає відео звідусіль, а zetvideo (озвучка UAFlix)
+# за кордоном на кожен шматок відео відповідає 404, хоча плейлист віддає. Тому за кордоном
+# один раз на сервер перевіряємо перший шматок відео (cdn) і такі джерела не показуємо.
+# cdn — {сервер: чи віддає відео сюди}
+GEO = {"blocked": False, "site": False, "cdn": {}}
 GEO_TEXT = "Змініть країну перегляду"  # плеєр ashdi
 SITE_GEO_TEXT = "змініть країну перегляду"  # сам сайт: «…за допомогою ВПН!» замість плеєра
 # enabled — налаштування; get_proxy() → «socks5h://127.0.0.1:порт» або None (задає main);
-# circuit — ім'я SOCKS, з яким останній маршрут Tor пропустило (різні імена — різні маршрути)
-ABROAD = {"enabled": True, "get_proxy": None, "circuit": None}
+# circuit — ім'я SOCKS, з яким останній маршрут Tor пропустило (різні імена — різні маршрути);
+# last — чим закінчилась остання спроба в обхід (для звіту про проблему)
+ABROAD = {"enabled": True, "get_proxy": None, "circuit": None, "last": ""}
+_cdn_lock = threading.Lock()
 
 
 def _get(url, referer=None, proxy=None):
@@ -568,16 +575,53 @@ def _fetch_abroad(url, referer, site=False):
     for _ in range(6):
         name = ABROAD["circuit"] or f"u{random.randrange(10 ** 8)}"
         proxy = base.replace("://", f"://{name}:x@", 1)
+        host = urlparse(url).netloc
         try:
             html = _get(url, referer=referer, proxy=proxy)
-        except Exception:
+        except Exception as ex:
             ABROAD["circuit"] = None
+            ABROAD["last"] = f"{host}: {type(ex).__name__} {str(ex)[:80]}"
             continue
         if blocked not in html:
             ABROAD["circuit"] = name
+            ABROAD["last"] = f"{host}: ok"
             return html
         ABROAD["circuit"] = None
+        ABROAD["last"] = f"{host}: вихідний вузол не визнано українським"
     return None
+
+
+def _first_segment(url, referer):
+    """Адреса першого шматка відео HLS-потоку (через вкладені плейлисти, без проксі)."""
+    for _ in range(3):
+        text = _get(url, referer)
+        lines = [x.strip() for x in text.splitlines() if x.strip() and not x.startswith("#")]
+        if not lines:
+            return None
+        url = urljoin(url, lines[0])
+        if ".m3u8" not in urlparse(url).path:
+            return url
+    return None
+
+
+def cdn_ok(url, referer):
+    """Чи віддає відеосервер цього потоку відео сюди (перевірка раз на сервер; лише
+    коли застосунок бачить, що він за кордоном). Невдала перевірка — вважаємо, що віддає."""
+    host = urlparse(url).netloc
+    with _cdn_lock:
+        if host in GEO["cdn"]:
+            return GEO["cdn"][host]
+        ok = True
+        try:
+            seg = _first_segment(url, referer)
+            if seg:
+                h = dict(HEADERS, Referer=referer, Range="bytes=0-1023")
+                r = _session.get(seg, headers=h, timeout=20, **IMPERSONATE)
+                ok = r.status_code not in (403, 404, 451)
+        except Exception:
+            pass
+        GEO["cdn"][host] = ok
+        return ok
 
 
 def _page_streams(url, label=(), html=None):
@@ -608,7 +652,32 @@ def _page_streams(url, label=(), html=None):
         found = [{"path": label + p if p else label, "url": l, "referer": url,
                   "voice": voice_name("", l), "subs": subs}
                  for p, l, subs in parse_player(html)]
+    if GEO["site"] or GEO["blocked"]:  # за кордоном — без серверів, що сюди відео не віддають
+        found = [f for f in found if cdn_ok(f["url"], f["referer"])]
     return html, found
+
+
+DIAG_URLS = ["https://uafix.net/", "https://ashdi.vip/", "https://zetvideo.net/",
+             "https://onionoo.torproject.org/summary?limit=1", "https://archive.torproject.org/"]
+
+
+def diagnostics(proxy=None):
+    """Текст для звіту про проблему: доступ до сайтів напряму (і через Tor) з ознаками
+    геоблокування та стан обходу."""
+    out = [f"site={GEO['site']} ashdi={GEO['blocked']} cdn={GEO['cdn']} "
+           f"tor_circuit={'так' if ABROAD.get('circuit') else 'ні'} last={ABROAD.get('last')}"]
+    for via, p in [("напряму", None)] + ([("через Tor", proxy)] if proxy else []):
+        for u in DIAG_URLS:
+            t = time.time()
+            try:
+                r = _session.get(u, headers=HEADERS, timeout=10,
+                                 proxies={"http": p, "https": p} if p else None, **IMPERSONATE)
+                geo = " ГЕОБЛОК" if GEO_TEXT in r.text or SITE_GEO_TEXT in r.text else ""
+                out.append(f"{via} {urlparse(u).netloc}: {r.status_code} "
+                           f"{time.time() - t:.1f} с{geo}")
+            except Exception as ex:
+                out.append(f"{via} {urlparse(u).netloc}: {type(ex).__name__} {str(ex)[:100]}")
+    return "\n".join(out)
 
 
 def get_streams(url, progress=lambda done, total: None, html=None):
