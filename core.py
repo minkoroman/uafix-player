@@ -70,6 +70,15 @@ def _get(url, referer=None, proxy=None):
     return r.text
 
 
+# коментарі глядачів: там теж пишуть «змініть країну перегляду через впн» — не блокування
+COMMENT_RE = re.compile(r"""<div id=['"]comm-id-\d+['"]>.*?</div>""", re.S)
+
+
+def site_geo_blocked(html):
+    """Сайт замість плеєра показує «змініть країну перегляду» (не враховуючи коментарі)."""
+    return SITE_GEO_TEXT in COMMENT_RE.sub("", html) if SITE_GEO_TEXT in html else False
+
+
 def _player_page(url):
     """Сторінка тайтлу чи серії (там, де плеєр), а не каталог чи пошук."""
     path = urlparse(url).path
@@ -89,7 +98,7 @@ def fetch(url, referer=None, proxy=None):
         if html is not None:
             return html
     html = _get(url, referer)
-    if abroad and SITE_GEO_TEXT in html:
+    if abroad and site_geo_blocked(html):
         GEO["blocked"] = GEO["site"] = True
         return _fetch_abroad(url, referer, site=True) or html
     return html
@@ -571,7 +580,6 @@ def _fetch_abroad(url, referer, site=False):
     base = getter()
     if not base:
         return None
-    blocked = SITE_GEO_TEXT if site else GEO_TEXT
     for _ in range(6):
         name = ABROAD["circuit"] or f"u{random.randrange(10 ** 8)}"
         proxy = base.replace("://", f"://{name}:x@", 1)
@@ -582,7 +590,7 @@ def _fetch_abroad(url, referer, site=False):
             ABROAD["circuit"] = None
             ABROAD["last"] = f"{host}: {type(ex).__name__} {str(ex)[:80]}"
             continue
-        if blocked not in html:
+        if not (site_geo_blocked(html) if site else GEO_TEXT in html):
             ABROAD["circuit"] = name
             ABROAD["last"] = f"{host}: ok"
             return html
