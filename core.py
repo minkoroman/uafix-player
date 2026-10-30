@@ -1,5 +1,6 @@
 """Мережа і парсинг uafix.net (спільне ядро для всіх платформ)."""
 import json
+import random
 import re
 import threading
 import time
@@ -9,30 +10,31 @@ from bs4 import BeautifulSoup
 
 try:
     from curl_cffi import requests as http
-    IMPERSONATE = {"impersonate": "chrome"}
+    # curl_cffi сам підставить правильний User-Agent і Sec-Ch-Ua під цей профіль
+    IMPERSONATE = {"impersonate": "chrome124"}
+    HEADERS = {
+        "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Upgrade-Insecure-Requests": "1"
+    }
+    UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" # Заглушка для stream_headers
 except ImportError:  # Android / коли curl_cffi недоступний
     import requests as http
+    import random
     IMPERSONATE = {}
+    USER_AGENTS = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    ]
+    UA = random.choice(USER_AGENTS)
+    HEADERS = {
+        "User-Agent": UA,
+        "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Upgrade-Insecure-Requests": "1"
+    }
 
 BASE = "https://uafix.net"
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/129.0 Safari/537.36")
-HEADERS = {"User-Agent": UA, "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8"}
 
-CATEGORIES = [
-    ("Серіали — всі", "/serials/"),
-    ("Серіали — нові", "/serials/new_uaserial/"),
-    ("Серіали 2026", "/serials/serial_2026_online/"),
-    ("Серіали 2025", "/serials/serial_2025_online/"),
-    ("Фільми — всі", "/films/"),
-    ("Фільми — новинки", "/films/new_netflix_ua/"),
-    ("Фільми 2026", "/films/uafilms_2026/"),
-    ("Мультфільми", "/cartoons/"),
-    ("Мультсеріали", "/serials/multseial/"),
-    ("Аніме", "/anime/"),
-    ("Дорами", "/dorama/"),
-    ("Наша озвучка", "/dubbing/"),
-]
+# ... (далі йде CATEGORIES) ...
 
 _session = http.Session() if hasattr(http, "Session") else http
 
@@ -82,8 +84,7 @@ def site_geo_blocked(html):
 def _player_page(url):
     """Сторінка тайтлу чи серії (там, де плеєр), а не каталог чи пошук."""
     path = urlparse(url).path
-    return urlparse(url).netloc == urlparse(BASE).netloc and \
-        bool(ITEM_PATH_RE.match(path) or EPISODE_LINK_RE.search(path) or "/sezon" in path)
+    return urlparse(url).netloc == urlparse(BASE).netloc and         bool(ITEM_PATH_RE.match(path) or EPISODE_LINK_RE.search(path) or "/sezon" in path)
 
 
 def fetch(url, referer=None, proxy=None):
@@ -573,7 +574,7 @@ def _fetch_abroad(url, referer, site=False):
     """Сторінка, недоступна в цьому регіоні, — через Tor. Деякі вихідні вузли сайт чи плеєр
     не визнає українськими — тоді інший маршрут (інше ім'я SOCKS), до 6 спроб; вдалий
     маршрут запам'ятовуємо."""
-    import random
+    # import random  # Видалено звідси, перенесено на початок файлу
     getter = ABROAD.get("get_proxy")
     if not ABROAD["enabled"] or getter is None:
         return None
