@@ -24,9 +24,10 @@ NAV = [
     ("Обране", "favorites", ft.Icons.BOOKMARK_ROUNDED),
     ("Історія", "history", ft.Icons.HISTORY_ROUNDED),
     ("Налаштування", "settings", ft.Icons.SETTINGS_ROUNDED),
-    ("Написати автору", "report", ft.Icons.BUG_REPORT_ROUNDED),
+    ("Відгук", "report", ft.Icons.BUG_REPORT_ROUNDED),
 ]
 MOBILE_NAV = ("home", "search", "/films/", "/serials/", "favorites")
+RAIL_TV_MIN, RAIL_TV_MAX = 64, 220  # меню TV: згорнуте (іконки) / розгорнуте
 BACK_KEYS = ("Escape", "Go Back", "Browser Back")
 
 
@@ -81,9 +82,16 @@ class App:
                         "settings": Settings(self)}
         self.Catalog = Catalog
         self.content = ft.Container(expand=True)
-        root = ft.Row([self.rail(), ft.VerticalDivider(width=1, color=T.LINE), self.content],
-                      spacing=0, expand=True) if not self.mobile else \
-            ft.Column([self.content, self.bottom_bar()], spacing=0, expand=True)
+        if self.mobile:
+            root = ft.Column([self.content, self.bottom_bar()], spacing=0, expand=True)
+        elif self.tv:
+            # TV (як Google TV): меню — смужка з іконками; фокус у ньому (стрілка вліво від
+            # крайньої картки) — розгортається поверх вмісту з підписами
+            root = ft.Stack([ft.Container(self.content, left=RAIL_TV_MIN, top=0, right=0,
+                                          bottom=0), self.rail()], expand=True)
+        else:
+            root = ft.Row([self.rail(), ft.VerticalDivider(width=1, color=T.LINE), self.content],
+                          spacing=0, expand=True)
         page.views.clear()
         page.views.append(ft.View(route="/", controls=[ft.SafeArea(root, expand=True)
                                                        if self.mobile else root],
@@ -102,23 +110,62 @@ class App:
 
     # ── меню
     def rail(self):
-        self.rail_items = {}
+        self.rail_items, self.rail_texts = {}, []
+        self.rail_focus = set()
+        tv = self.tv
         items = []
         for name, key, icon in NAV:
-            btn = kit.plate(kit.label(name, icon, size=T.S_SMALL, left=True),
-                            on_click=lambda e, k=key, n=name: self.show(k, n),
-                            pad=(14, 11 if self.tv else 12))
-            btn.width = (196 if self.tv else 236) - 32  # на всю ширину меню, напис — ліворуч
+            lab = kit.label(name, icon, size=T.S_SMALL, left=True)
+            if tv:
+                lab.controls[-1].visible = False  # згорнуте: лише іконка
+                self.rail_texts.append(lab.controls[-1])
+            btn = kit.plate(lab, on_click=lambda e, k=key, n=name: self.show(k, n),
+                            pad=(14, 11 if tv else 12),
+                            on_focus=(lambda f, k=key: self.rail_focused(k, f)) if tv else None)
+            btn.width = (RAIL_TV_MAX if tv else 236) - 32  # на всю ширину меню, напис — ліворуч
             self.rail_items[key] = btn
             items.append(ft.Container(btn, width=float("inf")))
-        mark = ft.Column([T.caps("UAFix", size=22 if self.tv else 26, weight=ft.FontWeight.W_900,
-                                 spacing=0.06),
-                          kit.kicker("кінотеатр українською")], spacing=2, tight=True)
-        return ft.Container(
-            ft.Column([mark, ft.Container(height=22)] + items, spacing=6,
-                      scroll=ft.ScrollMode.AUTO),
-            width=196 if self.tv else 236, padding=ft.Padding.only(left=16, right=16, top=26),
-            bgcolor=T.WALL)
+        self.rail_mark = ft.Column([T.caps("UAFix", size=22 if tv else 26, weight=ft.FontWeight.W_900,
+                                           spacing=0.06),
+                                    kit.kicker("кінотеатр українською")], spacing=2, tight=True,
+                                   visible=not tv)
+        self.rail_box = ft.Container(
+            ft.Column([self.rail_mark, ft.Container(height=22 if not tv else 8)] + items,
+                      spacing=6, scroll=ft.ScrollMode.AUTO),
+            width=RAIL_TV_MIN if tv else 236,
+            padding=ft.Padding.only(left=8 if tv else 16, right=8 if tv else 16, top=26),
+            bgcolor=T.WALL, clip_behavior=ft.ClipBehavior.HARD_EDGE)  # без анімації: підписи
+            #                                   не встигали за шириною й ламались у два рядки
+        if tv:
+            self.rail_box.left, self.rail_box.top, self.rail_box.bottom = 0, 0, 0
+            for b in self.rail_items.values():
+                b.width = RAIL_TV_MIN - 16
+        return self.rail_box
+
+    def rail_focused(self, key, on):
+        """TV: фокус зайшов у меню — розгорнути (підписи, назва); вийшов — згорнути."""
+        if on:
+            self.rail_focus.add(key)
+        else:
+            self.rail_focus.discard(key)
+        self.page.run_task(self._rail_settle)
+
+    async def _rail_settle(self):
+        await asyncio.sleep(0.05)  # перехід між пунктами меню: blur одного, focus іншого
+        open_ = bool(self.rail_focus)
+        if (self.rail_box.width == RAIL_TV_MAX) == open_:
+            return
+        self.rail_box.width = RAIL_TV_MAX if open_ else RAIL_TV_MIN
+        self.rail_mark.visible = open_
+        for t in self.rail_texts:
+            t.visible = open_
+        for b in self.rail_items.values():
+            b.width = (RAIL_TV_MAX if open_ else RAIL_TV_MIN) - 16
+        self.rail_box.shadow = ft.BoxShadow(blur_radius=40, color="#99000000") if open_ else None
+        self.rail_box.update()
+        cur = self.rail_items.get(self.section)
+        if open_ and cur is not None and self.section not in self.rail_focus:
+            await cur.focus()  # зайшли в меню — фокус на поточному розділі (як у Google TV)
 
     def bottom_bar(self):
         dests = [(n, k, i) for n, k, i in NAV if k in MOBILE_NAV]
