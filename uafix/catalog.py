@@ -201,3 +201,25 @@ class Favorites(Grid):
             self.body.update()
         except Exception:
             pass
+
+
+class History(Grid):
+    """Усе переглянуте (і завершене) — новіше першим."""
+
+    def __init__(self, app):
+        super().__init__(app, "Історія переглядів")
+
+    def shown(self):
+        self.reset()
+        items = [h for h in self.app.store.history if not h.get("removed") and h.get("url")]
+        self.status.value = "" if items else "Тут з'являться фільми й серіали, які ви дивились"
+        for i, h in enumerate(items):
+            it = {k: h.get(k, "") for k in ("url", "title", "orig", "poster", "age")}
+            card = kit.poster_card(self.app.page, it, self.app.open_title, self.card_w,
+                                   meta=self.app.store.settings.get("card_meta", True),
+                                   autofocus=self.app.tv and i == 0)
+            self.grid.controls.append(card)
+        try:
+            self.body.update()
+        except Exception:
+            pass

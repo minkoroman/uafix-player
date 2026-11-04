@@ -21,6 +21,7 @@ NAV = [
     ("Мультфільми", "/cartoons/", ft.Icons.CHILD_CARE_ROUNDED),
     ("Аніме", "/anime/", ft.Icons.AUTO_AWESOME_ROUNDED),
     ("Обране", "favorites", ft.Icons.BOOKMARK_ROUNDED),
+    ("Історія", "history", ft.Icons.HISTORY_ROUNDED),
     ("Налаштування", "settings", ft.Icons.SETTINGS_ROUNDED),
     ("Повідомити про проблему", "report", ft.Icons.BUG_REPORT_ROUNDED),
 ]
@@ -58,6 +59,7 @@ class App:
             page.window.bgcolor = T.FACADE
             page.update()
         page.on_view_pop = lambda e: self.back()
+        page.on_route_change = lambda e: (kit.quiet(), self.handle_link(e.route))
         page.on_keyboard_event = self.on_key
         await self.store.load()
         core.ABROAD["enabled"] = bool(self.store.settings.get("abroad", True))
@@ -67,9 +69,10 @@ class App:
         self.updates = Updates(self)
 
         from .home import Home
-        from .catalog import Catalog, Search, Favorites
+        from .catalog import Catalog, Search, Favorites, History
         from .settings import Settings
         self.screens = {"home": Home(self), "search": Search(self), "favorites": Favorites(self),
+                        "history": History(self),
                         "settings": Settings(self)}
         self.Catalog = Catalog
         self.content = ft.Container(expand=True)
@@ -83,6 +86,7 @@ class App:
         page.update()  # без цього на телефоні до згортання/розгортання був сірий екран
         self.show("home")
         page.run_task(self.updates.on_start)
+        self.handle_link(page.route)  # застосунок відкрили посиланням uafix://open?url=…
 
     def tor_proxy(self):
         def android_launch(exits):
@@ -190,6 +194,25 @@ class App:
     def open_title(self, item, autoplay=False):
         from .title import TitleScreen
         self.page.run_task(TitleScreen(self, item).open, autoplay)
+
+    def handle_link(self, route):
+        """uafix://open?url=<сторінка тайтлу>[&play=1] — напр. «Продовжити» з головного
+        екрана телевізора. Лише сторінки тайтлів самого сайту."""
+        from urllib.parse import parse_qs, urlparse
+        if "url=" not in (route or ""):
+            return
+        q = parse_qs(urlparse(route).query)
+        url = (q.get("url") or [""])[0].split("?")[0].split("#")[0]
+        if not url.startswith(core.BASE + "/") or not core.ITEM_PATH_RE.match(urlparse(url).path):
+            return
+        url += "" if url.endswith("/") else "/"
+        store = self.store
+        h = store.entry(url) or next((f for f in store.favorites if f["url"] == url), None) or {}
+        item = {k: h.get(k, "") for k in ("title", "orig", "poster", "age")}
+        item["url"] = url
+        while len(self.page.views) > 1:
+            self.back()
+        self.open_title(item, autoplay=(q.get("play") or ["0"])[0] == "1" and bool(h))
 
     def toast(self, message, error=False):
         self.page.show_dialog(ft.SnackBar(
