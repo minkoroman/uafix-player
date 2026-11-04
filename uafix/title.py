@@ -37,7 +37,7 @@ class TitleScreen:
         shade = ft.Container(left=0, top=0, right=0, bottom=0, gradient=ft.LinearGradient(
             begin=ft.Alignment.TOP_CENTER, end=ft.Alignment.BOTTOM_CENTER,
             colors=[ft.Colors.with_opacity(0.0, T.FACADE), ft.Colors.with_opacity(0.35, T.FACADE),
-                    T.FACADE], stops=[0.5, 0.78, 1.0]))
+                    T.FACADE], stops=[0.25, 0.55, 1.0] if app.tv else [0.5, 0.78, 1.0]))
         side_shade = ft.Container(left=0, top=0, right=0, bottom=0, gradient=ft.LinearGradient(
             begin=ft.Alignment.CENTER_LEFT, end=ft.Alignment.CENTER_RIGHT,
             colors=[ft.Colors.with_opacity(0.85, T.FACADE), ft.Colors.with_opacity(0, T.FACADE)],
@@ -74,8 +74,17 @@ class TitleScreen:
         self.saga_box = ft.Column(spacing=10, visible=False)
         self.people_box = ft.Column(spacing=10, visible=False)
         self.reviews_box = ft.Column(spacing=10, visible=False)
+        if app.tv:
+            # TV (як Google TV / Apple TV): кадр на весь екран, озвучка й кнопки — поверх
+            # нього внизу; інакше «Дивитись» опинялась за краєм екрана
+            heading.content.controls += [ft.Container(height=10), self.status,
+                                         self.voice_box, self.actions]
+            heading.bottom = 44
+            top_part = []
+        else:
+            top_part = [self.status, self.voice_box, self.actions]
         body = ft.Container(ft.Column([
-            self.status, self.voice_box, self.actions, self.description, self.cast_line,
+            *top_part, self.description, self.cast_line,
             self.episodes_box, self.saga_box, self.people_box, self.reviews_box], spacing=22),
             padding=ft.Padding.only(left=app.side, right=app.side, top=18, bottom=60),
             width=1100 if not app.mobile else None)
