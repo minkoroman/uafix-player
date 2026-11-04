@@ -29,7 +29,6 @@ class TitleScreen:
     # ── побудова
     async def open(self, autoplay=False):
         app = self.app
-        hero_h = 230 if app.mobile else (470 if app.tv else 420)
         # кадр — лише з TMDB (картинки сайту не вантажимо); знайдений раніше — одразу
         known, still = tmdb.cached(self.item["url"], "w1280")
         self.backdrop = ft.Container(kit.cover(still), left=0, top=0, right=0,
@@ -37,7 +36,7 @@ class TitleScreen:
         shade = ft.Container(left=0, top=0, right=0, bottom=0, gradient=ft.LinearGradient(
             begin=ft.Alignment.TOP_CENTER, end=ft.Alignment.BOTTOM_CENTER,
             colors=[ft.Colors.with_opacity(0.0, T.FACADE), ft.Colors.with_opacity(0.35, T.FACADE),
-                    T.FACADE], stops=[0.35, 0.7, 1.0]))
+                    T.FACADE], stops=[0.5, 0.78, 1.0]))
         side_shade = ft.Container(left=0, top=0, right=0, bottom=0, gradient=ft.LinearGradient(
             begin=ft.Alignment.CENTER_LEFT, end=ft.Alignment.CENTER_RIGHT,
             colors=[ft.Colors.with_opacity(0.85, T.FACADE), ft.Colors.with_opacity(0, T.FACADE)],
@@ -54,7 +53,9 @@ class TitleScreen:
         back = ft.Container(kit.plate(ft.Icon(ft.Icons.ARROW_BACK_ROUNDED, size=22),
                                       on_click=lambda e: app.back(), pad=(12, 10)),
                             left=app.side - 8, top=18, visible=not app.tv)
-        hero = ft.Stack([self.backdrop, side_shade, shade, heading, back], height=hero_h)
+        # кадр — повністю, у своїх пропорціях 16:9 (без обрізання); назва лягає на його низ
+        hero = ft.Container(ft.Stack([self.backdrop, side_shade, shade, heading, back]),
+                            aspect_ratio=16 / 9)
 
         self.status = ft.Row([kit.spinner(18), T.text("Шукаю відео…", size=T.S_SMALL, color=T.DIM)],
                              spacing=10)
