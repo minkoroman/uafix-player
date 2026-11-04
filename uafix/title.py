@@ -63,7 +63,8 @@ class TitleScreen:
         self.voice_row = ft.Row(wrap=True, spacing=8, run_spacing=8)
         self.voice_box = ft.Column([kit.kicker("Озвучка"), self.voice_row], spacing=8, visible=False)
         self.actions = ft.Row(wrap=True, spacing=10, run_spacing=10)
-        self.fav_btn = kit.plate(self.fav_label(), on_click=lambda e: self.toggle_fav())
+        self.fav_btn = kit.plate(self.fav_label(), on_click=lambda e: self.toggle_fav(),
+                                 on_focus=self.top_focus)
         self.description = T.text("", size=T.S_BODY, color=T.INK, max_lines=6 if not app.mobile else 8,
                                   overflow=ft.TextOverflow.ELLIPSIS)
         self.cast_line = T.text("", size=T.S_SMALL, color=T.DIM, visible=False)
@@ -224,21 +225,38 @@ class TitleScreen:
             buttons.append(kit.plate(kit.label(f"Продовжити · {what}{fmt_time(pos)}",
                                                ft.Icons.PLAY_ARROW_ROUNDED),
                                      on_click=lambda e: self.app.page.run_task(self.play_resume),
-                                     kind="board", autofocus=self.app.tv))
+                                     kind="board", autofocus=self.app.tv, on_focus=self.top_focus))
             buttons.append(kit.plate(kit.label("Спочатку", ft.Icons.REPLAY_ROUNDED),
                                      on_click=lambda e: self.app.page.run_task(
-                                         self.play, self.season, 0, 0)))
+                                         self.play, self.season, 0, 0), on_focus=self.top_focus))
         elif self.seasons:
             buttons.append(kit.plate(kit.label("Дивитись", ft.Icons.PLAY_ARROW_ROUNDED),
                                      on_click=lambda e: self.app.page.run_task(
                                          self.play, self.season, 0, 0),
-                                     kind="board", autofocus=self.app.tv))
+                                     kind="board", autofocus=self.app.tv, on_focus=self.top_focus))
         buttons.append(self.fav_btn)
         if self.info.get("trailer"):
             buttons.append(kit.plate(kit.label("Трейлер", ft.Icons.SMART_DISPLAY_ROUNDED),
                                      on_click=lambda e: self.app.page.run_task(
-                                         ft.UrlLauncher().launch_url, self.info["trailer"])))
+                                         ft.UrlLauncher().launch_url, self.info["trailer"]),
+                                     on_focus=self.top_focus))
         self.actions.controls = buttons
+
+    def top_focus(self, on):
+        """TV: фокус на кнопках угорі — сторінку до самого верху (кадр і назва повністю).
+        Інакше після прокручування вниз і назад верх так і лишався зрізаним."""
+        if on and self.app.tv:
+            self._top_n = getattr(self, "_top_n", 0) + 1
+            self.app.page.run_task(self._to_top, self._top_n)
+
+    async def _to_top(self, n):
+        await asyncio.sleep(0.12)  # після власного автоскролу Flutter
+        if n != self._top_n:
+            return
+        try:
+            await self.scroller.scroll_to(offset=0, duration=160)
+        except Exception:
+            pass
 
     def all_episodes(self):
         return [e for s in self.seasons for e in s["episodes"]]
@@ -281,7 +299,7 @@ class TitleScreen:
             icon = ft.Icons.SUBTITLES_ROUNDED if core.is_original(v) else ft.Icons.MIC_ROUNDED
             chips.append(kit.plate(kit.label(text, icon), kind="lit" if v == self.voice else "plain",
                                    on_click=(lambda e, v=v: self.pick_voice(v)) if many else None,
-                                   pad=(14, 10)))
+                                   pad=(14, 10), on_focus=self.top_focus))
         self.voice_row.controls = chips
         self.voice_box.visible = bool(chips)
 
