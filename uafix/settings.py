@@ -93,7 +93,9 @@ class Settings:
                  self.toggle("Зберігати історію переглядів", "keep_history"),
                  self.row("Очистити історію", "", self.ask_clear)]
         rows += [self.section("Синхронізація між пристроями")] + self.sync_rows()
+        from .report import open_report
         rows += [self.section("Про застосунок"),
+                 self.row("Повідомити про проблему", "", lambda e: open_report(self.app)),
                  ft.Container(T.text(f"UAFix Player {self.version()} · дані про фільми: TMDB",
                                      size=T.S_SMALL, color=T.DIM), padding=6)]
         self.body.controls = rows

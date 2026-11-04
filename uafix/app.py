@@ -22,6 +22,7 @@ NAV = [
     ("Аніме", "/anime/", ft.Icons.AUTO_AWESOME_ROUNDED),
     ("Обране", "favorites", ft.Icons.BOOKMARK_ROUNDED),
     ("Налаштування", "settings", ft.Icons.SETTINGS_ROUNDED),
+    ("Повідомити про проблему", "report", ft.Icons.BUG_REPORT_ROUNDED),
 ]
 MOBILE_NAV = ("home", "search", "/films/", "/serials/", "favorites")
 BACK_KEYS = ("Escape", "Go Back", "Browser Back")
@@ -139,6 +140,10 @@ class App:
     def show(self, key, name=None):
         """Розділ у правій частині (головна, пошук, каталог, обране)."""
         kit.quiet()
+        if key == "report":  # не розділ — вікно поверх поточного
+            from .report import open_report
+            open_report(self)
+            return
         self.section = key
         if key not in self.screens:
             self.screens[key] = self.Catalog(self, name or key, key)
