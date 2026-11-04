@@ -1,6 +1,7 @@
 """Каркас застосунку: меню розділів, перехід між екранами, «Назад», клавіші пульта."""
 import asyncio
 import os
+import time
 
 import flet as ft
 
@@ -37,6 +38,7 @@ class App:
         T.configure(self.mobile)  # розміри шрифтів — під телефон / TV / ПК
         self.side = 18 if self.mobile else 44
         self.key_handler = None   # клавіші для поточного екрана (плеєр)
+        self.back_at = 0.0
         self.section = "home"
         self.screens = {}
 
@@ -188,6 +190,13 @@ class App:
 
     async def on_key(self, e: ft.KeyboardEvent):
         kit.quiet()
+        if e.key in BACK_KEYS:
+            # затиснута клавіша (чи повтор пульта) шле «Назад» сотнями — один раз на 0,4 с
+            now = time.monotonic()
+            if now - self.back_at < 0.4:
+                self.back_at = now
+                return
+            self.back_at = now
         if self.key_handler and await self.key_handler(e.key):
             return
         if e.key in BACK_KEYS and not self.mobile:

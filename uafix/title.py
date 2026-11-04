@@ -69,9 +69,12 @@ class TitleScreen:
         self.episodes = ft.Column(spacing=0)
         self.episodes_box = ft.Column([kit.kicker("Серії"), self.season_row, self.episodes],
                                       spacing=12, visible=False)
+        self.saga_box = ft.Column(spacing=10, visible=False)
+        self.people_box = ft.Column(spacing=10, visible=False)
+        self.reviews_box = ft.Column(spacing=10, visible=False)
         body = ft.Container(ft.Column([
             self.status, self.voice_box, self.actions, self.description, self.cast_line,
-            self.episodes_box], spacing=22),
+            self.episodes_box, self.saga_box, self.people_box, self.reviews_box], spacing=22),
             padding=ft.Padding.only(left=app.side, right=app.side, top=18, bottom=60),
             width=1100 if not app.mobile else None)
         self.scroller = ft.ListView([hero, body], expand=True, spacing=0)
@@ -90,6 +93,9 @@ class TitleScreen:
         self.info = info
         self.fill_info()
         page.run_task(self.load_backdrop)
+        page.run_task(self.load_saga)
+        page.run_task(self.load_people)
+        self.show_reviews(info.get("comments") or [])
 
         # ── серії: плеєри на сторінці (фільм / серіал з плейлистом) або окремі сторінки серій
         try:
@@ -406,3 +412,115 @@ class TitleScreen:
         return next((s["entry"] for s in ep["sources"]
                      if not core.is_original(s["entry"].get("voice") or "")),
                     ep["sources"][0]["entry"])
+
+    # ── франшиза: табло частин у порядку виходу
+    async def load_saga(self):
+        info = self.info
+        try:
+            saga = await asyncio.to_thread(
+                tmdb.collection, self.item["url"], info.get("title") or self.item["title"],
+                info.get("orig") or self.item.get("orig", ""), info.get("year", ""))
+        except Exception:
+            return
+        if not saga:
+            return
+
+        def lookup(p):
+            if not p["released"]:
+                return None
+            try:
+                return core.find_title(p["orig"], p["title"], p["year"])
+            except Exception:
+                return None
+        found = await asyncio.gather(*[asyncio.to_thread(lookup, p) for p in saga["parts"]])
+        if not any(found):
+            return
+        rows = []
+        for i, (p, site) in enumerate(zip(saga["parts"], found)):
+            here = p["id"] == saga["current"] or (site or {}).get("url") == self.item["url"]
+            if here:
+                note, kind = "Ви тут", "signal"
+            elif site:
+                note, kind = "", "dim"
+            elif not p["released"]:
+                note, kind = "Скоро", "dim"
+            else:
+                note, kind = "Немає на сайті", "dim"
+            name = (site or {}).get("title") or p["title"]
+            cells = [(f"{i + 1}.  {name}", 5, "main"), (p["year"], 1, "dim"), (note, 2, kind)]
+            go = (lambda e, it=site: self.app.open_title(it)) if site and not here else None
+            rows.append(kit.board_row(cells, on_click=go, last=i == len(saga["parts"]) - 1,
+                                      height=60 if self.app.tv else 50))
+        name = saga["name"]
+        self.saga_box.controls = [kit.board(rows, f"Франшиза{' · ' + name if name else ''}"
+                                                  " · по порядку перегляду")]
+        self.saga_box.visible = True
+        self.update()
+
+    # ── актори (TMDB)
+    async def load_people(self):
+        info = self.info
+        try:
+            people = await asyncio.to_thread(
+                tmdb.cast, self.item["url"], info.get("title") or self.item["title"],
+                info.get("orig") or self.item.get("orig", ""), info.get("year", ""), 12)
+        except Exception:
+            return
+        if not people:
+            return
+        size = 96 if self.app.tv else 76 if not self.app.mobile else 64
+
+        def person(c):
+            face = ft.Container(
+                ft.Image(src=c["photo"], fit=ft.BoxFit.COVER, width=size, height=size)
+                if c["photo"] else T.caps((c["name"][:1] or "?"), size=size // 3, color=T.DIM),
+                width=size, height=size, border_radius=size / 2, bgcolor=T.WALL_2,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS, alignment=ft.Alignment.CENTER)
+            return ft.Column([face,
+                              ft.Text(c["name"], size=T.S_SMALL, weight=ft.FontWeight.W_700,
+                                      color=T.INK, max_lines=2, text_align=ft.TextAlign.CENTER,
+                                      width=size + 30),
+                              ft.Text(c["character"], size=T.S_SMALL - 1, color=T.DIM,
+                                      max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                                      text_align=ft.TextAlign.CENTER, width=size + 30)],
+                             spacing=6, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                             width=size + 30)
+
+        self.people_box.controls = [kit.kicker("У ролях"),
+                                    ft.Row([person(c) for c in people], spacing=14,
+                                           scroll=ft.ScrollMode.AUTO)]
+        self.people_box.visible = True
+        self.cast_line.visible = False  # імена — уже з фото
+        self.update()
+
+    # ── відгуки з сайту: найпопулярніші першими
+    def show_reviews(self, comments, limit=4):
+        if not comments:
+            return
+        ranked = sorted(comments, key=lambda c: -c["likes"])
+
+        def card(c):
+            staff = "адмін" in (c["role"] or "").lower()
+            head = ft.Row([
+                ft.Text(c["author"] + (" · сайт" if staff else ""), size=T.S_SMALL,
+                        weight=ft.FontWeight.W_800, color=T.SIGNAL if staff else T.INK),
+                ft.Text(c["date"], size=T.S_SMALL - 1, color=T.DIM),
+                *([ft.Text(f"♥ {c['likes']}", size=T.S_SMALL - 1, color=T.DIM)]
+                  if c["likes"] else [])], spacing=12, wrap=True)
+            body = ft.Column([head, ft.Text(c["text"], size=T.S_BODY, color=T.INK)],
+                             spacing=6, tight=True)
+            if self.app.tv:  # пульт «доходить» лише до того, що фокусується
+                return kit.plate(body, on_click=lambda e: None, pad=(18, 14), expand=True)
+            return ft.Container(body, padding=ft.Padding.symmetric(horizontal=18, vertical=14),
+                                bgcolor=T.WALL_2, border=ft.Border.all(1, T.LINE), border_radius=3)
+
+        def fill(n):
+            items = [card(c) for c in ranked[:n]]
+            if len(ranked) > n:
+                items.append(kit.plate(kit.label(f"Показати всі · {len(ranked)}"),
+                                       on_click=lambda e: (fill(len(ranked)), self.update())))
+            self.reviews_box.controls = [kit.kicker(f"Відгуки глядачів · {len(comments)}"),
+                                         *items]
+
+        fill(limit)
+        self.reviews_box.visible = True
