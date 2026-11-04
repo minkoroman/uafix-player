@@ -86,6 +86,19 @@ def kicker(text, color=None):
 
 
 # ── постери, рейтинг і жанри для карток — лише з TMDB (картинки сайту не вантажимо)
+# окрема черга потоків для того, на що чекає людина (сторінка фільму, пошук відео): у
+# спільній черзі воно стояло за рядами головної й постерами (на ТВ-приставці потоків мало)
+_FAST = None
+
+
+async def run_fast(fn, *args):
+    global _FAST
+    if _FAST is None:
+        from concurrent.futures import ThreadPoolExecutor
+        _FAST = ThreadPoolExecutor(4, thread_name_prefix="uafix-fast")
+    return await asyncio.get_running_loop().run_in_executor(_FAST, lambda: fn(*args))
+
+
 _slots = None
 POSTER = "w342"
 RATIO = 2 / 3  # вертикальний постер
@@ -128,7 +141,7 @@ def tmdb_poster(page, item, width, on_meta=None, meta=True):
     if not tmdb.enabled() or not item.get("url"):
         return box
     if _slots is None:
-        _slots = asyncio.Semaphore(6)
+        _slots = asyncio.Semaphore(3 if T.TV else 6)  # ТВ: не забирати всі потоки
 
     async def look():
         import core
@@ -203,7 +216,8 @@ def board(rows, label_text=None):
     return ft.Column([kicker(label_text), panel], spacing=10, tight=True)
 
 
-def board_row(cells, on_click=None, last=False, autofocus=False, height=None, trailing=None):
+def board_row(cells, on_click=None, last=False, autofocus=False, height=None, trailing=None,
+              on_focus=None):
     """Рядок табло. cells — [(текст, частка ширини, вид)], вид: "main" / "dim" / "signal".
     Колонки ділять ширину пропорційно (вузьке вікно не «з'їдає» назву).
     У фокусі / під мишею — інверсія: темна смуга, світлі літери."""
@@ -231,14 +245,18 @@ def board_row(cells, on_click=None, last=False, autofocus=False, height=None, tr
     def lit(on):
         for t, c in texts:
             t.color = T.BOARD if on else c
-            t.update()
+            try:  # рядок могли вже прибрати з екрана (перебудова табло) — тоді нічого
+                t.update()
+            except Exception:
+                return
 
     btn = ft.Button(
         content=ft.Container(body, height=None if T.MOBILE else (height or (56 if T.TV else 56)),
                              padding=ft.Padding.symmetric(vertical=12) if T.MOBILE else None,
                              alignment=ft.Alignment.CENTER_LEFT),
         on_click=_click(on_click), autofocus=autofocus, expand=True,
-        on_focus=lambda e: (quiet(), lit(True)), on_blur=lambda e: (quiet(), lit(False)),
+        on_focus=lambda e: (quiet(), lit(True), on_focus and on_focus()),
+        on_blur=lambda e: (quiet(), lit(False)),
         on_hover=lambda e: (quiet(), lit(e.data in (True, "true"))),
         style=ft.ButtonStyle(
             bgcolor={CTRL.FOCUSED: T.LETTER, CTRL.HOVERED: T.LETTER, CTRL.DEFAULT: T.BOARD},

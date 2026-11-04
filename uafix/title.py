@@ -95,8 +95,8 @@ class TitleScreen:
 
         # ── опис зі сторінки сайту
         try:
-            html = await asyncio.to_thread(core.fetch, self.item["url"])
-            info = await asyncio.to_thread(core.parse_title, html, self.item["url"])
+            html = await kit.run_fast(core.fetch, self.item["url"])
+            info = await kit.run_fast(core.parse_title, html, self.item["url"])
         except Exception as ex:
             self.status.controls = [T.text(core.friendly_error(ex, "сторінку"), color=T.SIGNAL)]
             self.update()
@@ -104,17 +104,15 @@ class TitleScreen:
         self.info = info
         self.fill_info()
         page.run_task(self.load_backdrop)
-        page.run_task(self.load_saga)
-        page.run_task(self.load_people)
         self.show_reviews(info.get("comments") or [])
 
         # ── серії: плеєри на сторінці (фільм / серіал з плейлистом) або окремі сторінки серій
         try:
-            found = await asyncio.to_thread(core.page_streams, self.item["url"], html)
+            found = await kit.run_fast(core.page_streams, self.item["url"], html)
             if found:
                 self.seasons = core.group_streams(found)
             else:
-                episodes, locked = await asyncio.to_thread(core.list_episodes, self.item["url"], html)
+                episodes, locked = await kit.run_fast(core.list_episodes, self.item["url"], html)
                 self.seasons = core.group_episode_pages(episodes, locked)
         except Exception as ex:
             self.status.controls = [T.text(core.friendly_error(ex, "серії"), color=T.SIGNAL)]
@@ -136,6 +134,9 @@ class TitleScreen:
         if not self.voices:
             page.run_task(self.detect_voices)
         self.render()
+        # другорядне — лише тепер, щоб не займало мережу й потоки, поки шукаємо відео
+        page.run_task(self.load_saga)
+        page.run_task(self.load_people)
         if autoplay:
             await self.play_resume()
 
@@ -331,7 +332,7 @@ class TitleScreen:
     # ── перегляд
     async def ensure_sources(self, ep):
         if ep["sources"] is None:
-            ep["sources"] = await asyncio.to_thread(core.episode_sources, ep["page"])
+            ep["sources"] = await kit.run_fast(core.episode_sources, ep["page"])
         return ep["sources"]
 
     async def play_resume(self):
@@ -371,7 +372,7 @@ class TitleScreen:
                 await self.play_external(ep)
                 return
         try:  # якості потоку — у фоні, щоб плеєр узяв обрану (мережа)
-            await asyncio.wait_for(asyncio.to_thread(core.hls_variants, self.pick_source(ep)), 12)
+            await asyncio.wait_for(kit.run_fast(core.hls_variants, self.pick_source(ep)), 12)
         except Exception:
             pass
         from .player import Player

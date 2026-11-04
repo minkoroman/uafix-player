@@ -127,7 +127,8 @@ class Home:
                                     tooltip="Прибрати з історії")
             rows.append(kit.board_row(
                 cells, on_click=lambda e, it=item: self.app.open_title(it),
-                last=i == len(items) - 1, trailing=remove))
+                last=i == len(items) - 1, trailing=remove,
+                on_focus=(lambda: self.reveal_row(None)) if self.app.tv else None))
         self.board_box.controls = [kit.board(rows, "Сьогодні в залі · Продовжити перегляд")] \
             if rows else []
         self.board_section.visible = bool(rows)
@@ -226,7 +227,13 @@ class Home:
             pass
 
     def reveal_row(self, key):
-        if getattr(self, "_row_key", None) == key:
+        """TV: ряд у фокусі — разом із заголовком. Табло (key=None) і перший ряд — на самий
+        верх списку (інакше назва застосунку й підпис першого ряду лишались схованими)."""
+        if getattr(self, "_row_key", "-") == key:
             return  # уже показано (рух уздовж ряду)
         self._row_key = key
-        self.app.page.run_task(self.list.scroll_to, scroll_key=key, duration=180)
+        first = f"shelf-{SHELVES[0][1]}"
+        if key is None or (key == first and not self.board_section.visible):
+            self.app.page.run_task(self.list.scroll_to, offset=0, duration=180)
+        else:
+            self.app.page.run_task(self.list.scroll_to, scroll_key=key, duration=180)

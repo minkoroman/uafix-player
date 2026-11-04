@@ -129,6 +129,11 @@ class App:
                                            spacing=0.06),
                                     kit.kicker("кінотеатр українською")], spacing=2, tight=True,
                                    visible=not tv)
+        if tv:
+            # «стінки» над першим і під останнім пунктом: затиснуте вгору / вниз інакше
+            # виводило фокус із меню на картки (Flutter шукав найближче вище / нижче)
+            keys = list(self.rail_items)
+            items = [self.rail_wall(keys[0])] + items + [self.rail_wall(keys[-1])]
         self.rail_box = ft.Container(
             ft.Column([self.rail_mark, ft.Container(height=22 if not tv else 8)] + items,
                       spacing=6, scroll=ft.ScrollMode.AUTO),
@@ -143,11 +148,21 @@ class App:
         return self.rail_box
 
     async def keep_focus(self, control):
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.01)
         try:
             await control.focus()
         except Exception:
             pass
+
+    def rail_wall(self, edge_key):
+        """Невидима кнопка-«стінка»: отримала фокус — одразу повертає його на край меню."""
+        return ft.Button(
+            content=ft.Container(height=2), on_click=lambda e: None, height=2,
+            on_focus=lambda e: (kit.quiet(), self.page.run_task(self.keep_focus,
+                                                                 self.rail_items[edge_key])),
+            style=ft.ButtonStyle(bgcolor=ft.Colors.TRANSPARENT, elevation=0, padding=0,
+                                 overlay_color=ft.Colors.TRANSPARENT,
+                                 shadow_color=ft.Colors.TRANSPARENT, animation_duration=0))
 
     def rail_focused(self, key, on):
         """TV: фокус зайшов у меню — розгорнути (підписи, назва); вийшов — згорнути."""
