@@ -499,15 +499,39 @@ class TitleScreen:
                 if c["photo"] else T.caps((c["name"][:1] or "?"), size=size // 3, color=T.DIM),
                 width=size, height=size, border_radius=size / 2, bgcolor=T.WALL_2,
                 clip_behavior=ft.ClipBehavior.ANTI_ALIAS, alignment=ft.Alignment.CENTER)
-            return ft.Column([face,
-                              ft.Text(c["name"], size=T.S_SMALL, weight=ft.FontWeight.W_700,
-                                      color=T.INK, max_lines=2, text_align=ft.TextAlign.CENTER,
-                                      width=size + 30),
-                              ft.Text(c["character"], size=T.S_SMALL - 1, color=T.DIM,
-                                      max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
-                                      text_align=ft.TextAlign.CENTER, width=size + 30)],
-                             spacing=6, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                             width=size + 30)
+            name = ft.Text(c["name"], size=T.S_SMALL, weight=ft.FontWeight.W_700,
+                           color=T.INK, max_lines=2, text_align=ft.TextAlign.CENTER)
+            name_box = ft.Container(name, padding=ft.Padding.symmetric(horizontal=4, vertical=1),
+                                    border_radius=2, width=size + 30)
+            col = ft.Column([face, name_box,
+                             ft.Text(c["character"], size=T.S_SMALL - 1, color=T.DIM,
+                                     max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                                     text_align=ft.TextAlign.CENTER, width=size + 30)],
+                            spacing=6, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                            width=size + 30)
+            if not self.app.tv:
+                return col
+            # TV: пульт «ходить» лише по тому, що фокусується — інакше з відгуків «вгору»
+            # перестрибувало одразу на кнопки. У фокусі — світле кільце навколо фото.
+            face.border = ft.Border.all(3, ft.Colors.TRANSPARENT)
+
+            def ring(on):
+                kit.quiet()
+                face.border = ft.Border.all(3, T.BOARD if on else ft.Colors.TRANSPARENT)
+                name_box.bgcolor = T.BOARD if on else None  # ім'я — табличкою, як на картках
+                name.color = T.LETTER if on else T.INK
+                try:
+                    face.update()
+                    name_box.update()
+                except Exception:
+                    pass
+            return ft.Button(content=col, on_click=lambda e: None,
+                             on_focus=lambda e: ring(True), on_blur=lambda e: ring(False),
+                             style=ft.ButtonStyle(bgcolor=ft.Colors.TRANSPARENT, elevation=0,
+                                                  overlay_color=ft.Colors.TRANSPARENT,
+                                                  shadow_color=ft.Colors.TRANSPARENT,
+                                                  padding=4, animation_duration=0,
+                                                  shape=ft.RoundedRectangleBorder(radius=4)))
 
         self.people_box.controls = [kit.kicker("У ролях"),
                                     ft.Row([person(c) for c in people], spacing=14,
@@ -530,10 +554,21 @@ class TitleScreen:
                 ft.Text(c["date"], size=T.S_SMALL - 1, color=T.DIM),
                 *([ft.Text(f"♥ {c['likes']}", size=T.S_SMALL - 1, color=T.DIM)]
                   if c["likes"] else [])], spacing=12, wrap=True)
-            body = ft.Column([head, ft.Text(c["text"], size=T.S_BODY, color=T.INK)],
-                             spacing=6, tight=True)
+            text = ft.Text(c["text"], size=T.S_BODY, color=T.INK)
+            body = ft.Column([head, text], spacing=6, tight=True)
             if self.app.tv:  # пульт «доходить» лише до того, що фокусується
-                return kit.plate(body, on_click=lambda e: None, pad=(18, 14), expand=True)
+                # у фокусі плашка світла — тоді й літери темні (інакше світле на світлому)
+                plain = [(t, t.color) for t in head.controls + [text]]
+
+                def lit(on):
+                    for t, col in plain:
+                        t.color = (T.LETTER if col != T.SIGNAL else T.SIGNAL) if on else col
+                    try:
+                        body.update()
+                    except Exception:
+                        pass
+                return kit.plate(body, on_click=lambda e: None, pad=(18, 14), expand=True,
+                                 on_focus=lit)
             return ft.Container(body, padding=ft.Padding.symmetric(horizontal=18, vertical=14),
                                 bgcolor=T.WALL_2, border=ft.Border.all(1, T.LINE), border_radius=3)
 
