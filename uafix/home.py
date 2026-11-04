@@ -178,10 +178,15 @@ class Home:
                     if self.app.tv else None))
                 box.append(cards[-1])
             if self.app.tv and cards:  # замість «Усі» в заголовку — остання плашка в ряду
+                box = []
                 cards.append(ft.Container(kit.plate(
                     ft.Container(kit.label("Усі", ft.Icons.ARROW_FORWARD_ROUNDED),
-                                 height=w / kit.RATIO, alignment=ft.Alignment.CENTER),
-                    on_click=lambda e: self.app.show(path, name)), padding=6))
+                                 height=w / kit.RATIO - 28, width=w - 36,  # як постер
+                                 alignment=ft.Alignment.CENTER),
+                    on_click=lambda e: self.app.show(path, name),
+                    on_focus=lambda f, k=f"shelf-{path}", b=box: f and self.focused(k, b[0])),
+                    padding=ft.Padding.only(left=6, right=6, top=6)))
+                box.append(cards[-1].content)
             row.controls = cards or [ft.Container(T.text("Не вдалося завантажити", color=T.DIM),
                                                   padding=20)]
             try:
@@ -236,18 +241,24 @@ class Home:
 
     def focused(self, key, control):
         self.last_focus = control
-        if key is None or key == f"shelf-{SHELVES[0][1]}":
-            self._row_key = "-"  # верх головної — завжди докрутити до заголовка
         self.reveal_row(key)
 
     def reveal_row(self, key):
         """TV: ряд у фокусі — разом із заголовком. Табло (key=None) і перший ряд — на самий
-        верх списку (інакше назва застосунку й підпис першого ряду лишались схованими)."""
-        if getattr(self, "_row_key", "-") == key:
-            return  # уже показано (рух уздовж ряду)
-        self._row_key = key
+        верх списку. Докручуємо ПІСЛЯ власного автоскролу Flutter (той підтягує лише картку,
+        і заголовок ряду ховався) — на кожен фокус, останній виграє."""
+        self._reveal_n = getattr(self, "_reveal_n", 0) + 1
+        self.app.page.run_task(self._reveal, key, self._reveal_n)
+
+    async def _reveal(self, key, n):
+        await asyncio.sleep(0.12)
+        if n != self._reveal_n:
+            return  # уже є новіший фокус
         first = f"shelf-{SHELVES[0][1]}"
-        if key is None or (key == first and not self.board_section.visible):
-            self.app.page.run_task(self.list.scroll_to, offset=0, duration=180)
-        else:
-            self.app.page.run_task(self.list.scroll_to, scroll_key=key, duration=180)
+        try:
+            if key is None or (key == first and not self.board_section.visible):
+                await self.list.scroll_to(offset=0, duration=160)
+            else:
+                await self.list.scroll_to(scroll_key=key, duration=160)
+        except Exception:
+            pass
