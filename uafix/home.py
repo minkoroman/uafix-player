@@ -177,20 +177,36 @@ class Home:
                     on_focus=(lambda f, k=f"shelf-{path}", b=box: f and self.focused(k, b[0]))
                     if self.app.tv else None))
                 box.append(cards[-1])
-            if self.app.tv and cards:  # замість «Усі» в заголовку — остання плашка в ряду
+            if self.app.tv and cards:  # замість «Усі» в заголовку — компактна плашка в кінці ряду
                 box = []
-                cards.append(ft.Container(kit.plate(
-                    ft.Container(kit.label("Усі", ft.Icons.ARROW_FORWARD_ROUNDED),
-                                 height=w / kit.RATIO - 28, width=w - 36,  # як постер
-                                 alignment=ft.Alignment.CENTER),
-                    on_click=lambda e: self.app.show(path, name),
-                    on_focus=lambda f, k=f"shelf-{path}", b=box: f and self.focused(k, b[0])),
-                    padding=ft.Padding.only(left=7, right=7, top=7),
-                    alignment=ft.Alignment.TOP_CENTER))  # без цього ряд розтягував її на всю висоту
-                box.append(cards[-1].content)
-                # «стінка» після «Усі»: вправо з кінця ряду фокус лишається тут (інакше Flutter
-                # знаходив найближче праворуч — картку сусіднього ряду)
-                cards.append(self.app.focus_wall(lambda b=box: b[0], width=2))
+                key = f"shelf-{path}"
+
+                def make_more():
+                    return kit.plate(
+                        kit.label("Усі", ft.Icons.ARROW_FORWARD_ROUNDED),
+                        on_click=lambda e: self.app.show(path, name), pad=(16, 12),
+                        on_focus=lambda f: f and self.focused(key, box[0]))
+                # ряд розтягує дітей на всю висоту: зовнішній — угорі, внутрішній — висотою
+                # з постер, плашка — по його центру
+                holder = ft.Container(make_more(), height=w / kit.RATIO + 14,
+                                      alignment=ft.Alignment.CENTER)
+                box.append(holder.content)
+                cards.append(ft.Container(holder, padding=ft.Padding.only(left=8, right=8),
+                                          alignment=ft.Alignment.TOP_CENTER))
+
+                def bounce():
+                    """«Вправо» з «Усі» влучило в «стінку» за нею — фокус назад на нову копію
+                    «Усі»: Flutter пам'ятає шлях фокуса, і зі старою плашкою «вліво» потім
+                    спершу «поверталось» на неї ж (стільки разів, скільки натиснули вправо)."""
+                    fresh = make_more()
+                    holder.content = fresh
+                    box[0] = fresh
+                    try:
+                        holder.update()
+                    except Exception:
+                        return None
+                    return fresh
+                cards.append(self.app.focus_wall(bounce, width=2))
             row.controls = cards or [ft.Container(T.text("Не вдалося завантажити", color=T.DIM),
                                                   padding=20)]
             try:
