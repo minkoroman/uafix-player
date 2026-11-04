@@ -68,9 +68,11 @@ class Grid:
         for it in items:
             if it["url"] in known:
                 continue
+            n = len(self.grid.controls)
             card = kit.poster_card(self.app.page, it, self.app.open_title, self.card_w,
                                    meta=self.app.store.settings.get("card_meta", True),
-                                   autofocus=self.app.tv and not self.grid.controls)
+                                   autofocus=self.app.tv and not self.grid.controls,
+                                   on_focus=lambda f, n=n: f and self.near_end(n))
             card.data = it["url"]
             self.grid.controls.append(card)
         self.has_more = len(items) >= 10
@@ -79,6 +81,17 @@ class Grid:
             self.body.update()
         except Exception:
             pass
+        # сайт дає по 12 на сторінку: поки екран не заповнений (прокрутки нема — й події
+        # прокрутки нема), довантажуємо одразу
+        if self.has_more and len(self.grid.controls) < self.MIN_ITEMS:
+            self.next_page()
+
+    MIN_ITEMS = 36
+
+    def near_end(self, n):
+        """Фокус пульта дійшов до останніх двох рядів — наступна сторінка, не чекаючи прокрутки."""
+        if self.has_more and not self.busy and n >= len(self.grid.controls) - 16:
+            self.next_page()
 
 
 # тематичні добірки розділу — їх немає серед жанрів фільтра сайту (окремі сторінки)
