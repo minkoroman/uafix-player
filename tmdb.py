@@ -197,6 +197,13 @@ def _lookup(url, title, orig, year):
     return None
 
 
+def year_cached(url):
+    """Рік виходу (з TMDB-пошуку картки) або "" — без мережі."""
+    with _lock:
+        _load()
+        return _years.get(url, "") or ""
+
+
 def poster_cached(url, size="w342"):
     """(чи вже шукали, URL вертикального постера або None) — без мережі."""
     if not TMDB_TOKEN:

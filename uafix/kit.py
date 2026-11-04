@@ -196,18 +196,34 @@ def poster_card(page, item, on_open, width, meta=True, autofocus=False, on_focus
         ft.Text(item.get("age") or "", size=T.S_SMALL - 2, weight=ft.FontWeight.W_800,
                 color=T.LETTER), bgcolor=T.BOARD,
         padding=ft.Padding.symmetric(horizontal=5, vertical=1),
-        border_radius=2, visible=bool(item.get("age")), left=6, top=6)
+        border_radius=2, visible=bool(item.get("age")))
+
+    # рік виходу — під віком (з TMDB; з'являється разом із рейтингом)
+    year_text = ft.Text("", size=T.S_SMALL - 2, weight=ft.FontWeight.W_800, color=T.LETTER)
+    year = ft.Container(year_text, bgcolor=T.BOARD,
+                        padding=ft.Padding.symmetric(horizontal=5, vertical=1),
+                        border_radius=2, visible=False)
+
+    def put_year():
+        y = tmdb.year_cached(item["url"]) if item.get("url") else ""
+        year_text.value = y
+        year.visible = bool(y)
 
     def show(rating, genres, late):
         bits = ([f"★ {rating:.1f}"] if rating else []) + list(genres[:1])
         sub.value = "  ·  ".join(bits) or sub.value
+        put_year()
         if late:
             try:
                 sub.update()
+                year.update()
             except Exception:
                 pass
 
-    pic = ft.Stack([tmdb_poster(page, item, width, show, meta), age],
+    put_year()
+    badges = ft.Column([age, year], spacing=4, tight=True,
+                       horizontal_alignment=ft.CrossAxisAlignment.START, left=6, top=6)
+    pic = ft.Stack([tmdb_poster(page, item, width, show, meta), badges],
                    width=width, height=width / RATIO)
     body = ft.Column([pic, ft.Container(ft.Column([title, sub], spacing=1, tight=True),
                                         padding=ft.Padding.only(left=2, right=2, top=6))],
