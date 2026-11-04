@@ -51,6 +51,7 @@ class Grid:
 
     def card_focused(self, i):
         self._rebuild = lambda: self.rebuild_card(i)
+        self.app.content_focused(self.bounce)
         self.near_end(i)
 
     def rebuild_card(self, i):
@@ -213,6 +214,7 @@ class Catalog(Grid):
 
     def filter_focused(self, i):
         self._rebuild = lambda: self.rebuild_filter(i)
+        self.app.content_focused(self.bounce)
 
     def rebuild_filter(self, i):
         self.render_filters()
@@ -281,7 +283,8 @@ class Search(Grid):
             border_radius=3, cursor_color=T.SIGNAL, color=T.INK,
             prefix_icon=ft.Icons.SEARCH_ROUNDED, on_submit=lambda e: self.run(e.control.value),
             on_change=self.typed,
-            on_focus=lambda e: setattr(self, "_rebuild", lambda: self.field))
+            on_focus=lambda e: (setattr(self, "_rebuild", lambda: self.field),
+                                self.app.content_focused(self.bounce)))
         self.recent = ft.Row(wrap=True, spacing=8, run_spacing=8)
         self.recent_box = ft.Container(
             ft.Column([kit.kicker("Нещодавні пошуки"), self.recent], spacing=10, tight=True),

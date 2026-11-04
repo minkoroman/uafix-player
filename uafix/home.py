@@ -281,6 +281,7 @@ class Home:
 
     def focused(self, key, control):
         self.last_focus = control
+        self.app.content_focused(self.bounce)
         self.reveal_row(key)
 
     def reveal_row(self, key):

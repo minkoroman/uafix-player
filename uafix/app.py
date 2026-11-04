@@ -180,6 +180,15 @@ class App:
                                  overlay_color=ft.Colors.TRANSPARENT,
                                  shadow_color=ft.Colors.TRANSPARENT, animation_duration=0))
 
+    # ── меню відкривається лише стрілкою вліво: якщо фокус «упав» у меню зі вмісту стрілкою
+    #    вгору / вниз (Flutter шукає найближче вище / нижче — а це пункти меню), його одразу
+    #    повертає назад на той самий елемент вмісту
+    def content_focused(self, rebuild):
+        """Вміст отримав фокус. rebuild() → той самий елемент, свіжий (див. focus_wall:
+        інакше Flutter пам'ятає шлях і наступна стрілка назад лише «поверталась» на нього)."""
+        self.zone = "content"
+        self.content_rebuild = rebuild
+
     def rail_focused(self, key, on):
         """TV: фокус зайшов у меню — розгорнути (підписи, назва); вийшов — згорнути."""
         if on:
@@ -188,8 +197,21 @@ class App:
             self.rail_focus.discard(key)
         self.page.run_task(self._rail_settle)
 
+    def _fell_into_rail(self):
+        return (getattr(self, "zone", "") == "content" and self.rail_focus
+                and getattr(self, "last_vkey", 0) > time.monotonic() - 0.5
+                and getattr(self, "content_rebuild", None) is not None)
+
     async def _rail_settle(self):
         await asyncio.sleep(0.05)  # перехід між пунктами меню: blur одного, focus іншого
+        if self._fell_into_rail():
+            self.last_vkey = 0
+            target = self.content_rebuild()
+            if target is not None:
+                await self.keep_focus(target)
+                return
+        if self.rail_focus:
+            self.zone = "rail"
         open_ = bool(self.rail_focus)
         if (self.rail_box.width == RAIL_TV_MAX) == open_:
             return
@@ -334,7 +356,12 @@ class App:
 
     async def on_key(self, e: ft.KeyboardEvent):
         kit.quiet()
-        if self.tv and self.rail_focus and e.key in ("Arrow Up", "Arrow Down"):
+        if e.key in ("Arrow Up", "Arrow Down"):
+            self.last_vkey = time.monotonic()
+            if self.tv and self.rail_focus and getattr(self, "zone", "") == "content":
+                self.page.run_task(self._rail_settle)  # подія клавіші прийшла після фокусу
+        if self.tv and self.rail_focus and e.key in ("Arrow Up", "Arrow Down") \
+                and getattr(self, "zone", "") == "rail":
             # краї меню: Flutter шукає «найближче» вище / нижче й перескакував праворуч у вміст
             keys = list(self.rail_items)
             edge = keys[0] if e.key == "Arrow Up" else keys[-1]
