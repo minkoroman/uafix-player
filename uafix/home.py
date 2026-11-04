@@ -25,17 +25,21 @@ def left_text(h):
     return f"Лишилось {m // 60} г {m % 60:02d} хв" if m >= 60 else f"Лишилось {m} хв"
 
 
-def ep_text(h):
+def ep_text(h, short=False):
+    """«Сезон 1 · Серія 3» (short — «С1 · Е3», для компактного табло)."""
     parts = [h["season"]] if h.get("season") else []
     if h.get("label") and h["label"] != "Фільм":
         parts.append(h["label"].split(" — ")[0])
-    return " · ".join(parts) or "Фільм"
+    text = " · ".join(parts) or "Фільм"
+    if short:
+        text = text.replace("Сезон ", "С").replace("Серія ", "Е")
+    return text
 
 
 class Home:
     def __init__(self, app):
         self.app = app
-        self.card_w = 200 if app.mobile else (176 if app.tv else 250)
+        self.card_w = 112 if app.mobile else (118 if app.tv else 160)
         self.board_box = ft.Column(spacing=0)
         self.board_section = ft.Container(
             self.board_box, padding=ft.Padding.only(left=app.side, right=app.side, top=28),
@@ -79,9 +83,9 @@ class Home:
         rows = []
         for i, h in enumerate(items):
             item = {k: h.get(k, "") for k in ("url", "title", "orig", "poster", "age")}
-            if self.app.mobile:  # телефон: назва, під нею серія й «лишилось»
-                cells = [(h.get("title"), 1, "main"), (ep_text(h), 1, "dim"),
-                         (left_text(h), 1, "signal")]
+            if self.app.mobile or self.app.tv:  # компактно: назва, під нею решта
+                cells = [(h.get("title"), 1, "main"), (ep_text(h, True), 1, "dim"),
+                         (left_text(h), 1, "signal"), (h.get("voice") or "", 1, "dim")]
             else:
                 cells = [(h.get("title"), 7, "main"), (ep_text(h), 4, "dim"),
                          (left_text(h), 4, "signal"), (h.get("voice") or "", 3, "dim")]
@@ -111,8 +115,8 @@ class Home:
     # ── ряд афіш
     def shelf(self, name, path, block):
         w = self.card_w
-        row = ft.ListView(kit.placeholder_row(6, w), horizontal=True, spacing=8,
-                          height=w / (16 / 9) + 84,
+        row = ft.ListView(kit.placeholder_row(8, w), horizontal=True, spacing=6,
+                          height=w / kit.RATIO + 70,
                           padding=ft.Padding.symmetric(horizontal=self.app.side - 6))
         more = kit.plate(kit.label("Усі"), on_click=lambda e: self.app.show(path, name),
                          pad=(14, 8)) if not self.app.tv else ft.Container()
@@ -133,7 +137,7 @@ class Home:
             if self.app.tv and cards:  # замість «Усі» в заголовку — остання плашка в ряду
                 cards.append(ft.Container(kit.plate(
                     ft.Container(kit.label("Усі", ft.Icons.ARROW_FORWARD_ROUNDED),
-                                 height=w / (16 / 9), alignment=ft.Alignment.CENTER),
+                                 height=w / kit.RATIO, alignment=ft.Alignment.CENTER),
                     on_click=lambda e: self.app.show(path, name)), padding=6))
             row.controls = cards or [ft.Container(T.text("Не вдалося завантажити", color=T.DIM),
                                                   padding=20)]

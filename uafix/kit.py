@@ -85,25 +85,26 @@ def kicker(text, color=None):
                   spacing=0.14)
 
 
-# ── кадри, рейтинг і жанри для карток — лише з TMDB (картинки сайту не вантажимо)
+# ── постери, рейтинг і жанри для карток — лише з TMDB (картинки сайту не вантажимо)
 _slots = None
-STILL = "w780"
+POSTER = "w342"
+RATIO = 2 / 3  # вертикальний постер
 
 
 def _title_plate(title):
-    """Замість кадру (поки шукаємо чи якщо TMDB не знайшов): назва написом табло."""
+    """Замість постера (поки шукаємо чи якщо TMDB не знайшов): назва написом табло."""
     return ft.Container(
-        ft.Text((title or "").upper(), size=T.S_SMALL + 1, weight=ft.FontWeight.W_800,
-                color=T.DIM, text_align=ft.TextAlign.CENTER, max_lines=3,
-                overflow=ft.TextOverflow.ELLIPSIS, style=ft.TextStyle(letter_spacing=1.5)),
-        alignment=ft.Alignment.CENTER, padding=14, bgcolor=T.WALL_2)
+        ft.Text((title or "").upper(), size=T.S_SMALL, weight=ft.FontWeight.W_800,
+                color=T.DIM, text_align=ft.TextAlign.CENTER, max_lines=4,
+                overflow=ft.TextOverflow.ELLIPSIS, style=ft.TextStyle(letter_spacing=1.2)),
+        alignment=ft.Alignment.CENTER, padding=10, bgcolor=T.WALL_2)
 
 
-def tmdb_still(page, item, width, on_meta=None, meta=True):
-    """Кадр 16:9 з TMDB: з кешу одразу, інакше — пошук (спершу укр. назва, потім
-    оригінальна). on_meta(rating, genres, late) — рейтинг і жанри заразом."""
+def tmdb_poster(page, item, width, on_meta=None, meta=True):
+    """Вертикальний постер TMDB: з кешу одразу, інакше — один пошук (укр. назва, потім
+    оригінальна), з якого заразом рейтинг і жанри (on_meta(rating, genres, late))."""
     global _slots
-    h = width / (16 / 9)
+    h = width / RATIO
     box = ft.Container(_title_plate(item.get("title")), width=width, height=h,
                        bgcolor=T.WALL_2, border_radius=3, clip_behavior=ft.ClipBehavior.ANTI_ALIAS)
 
@@ -113,21 +114,21 @@ def tmdb_still(page, item, width, on_meta=None, meta=True):
                                    width=width, height=h,
                                    error_content=_title_plate(item.get("title")))
 
-    known, src = tmdb.cached(item["url"], STILL) if item.get("url") else (True, None)
+    def meta_now():
+        k, m = tmdb.meta_cached(item["url"])
+        if k and m and (m["rating"] or m["genres"]):
+            on_meta(m["rating"], m["genres"], False)
+        return k
+
+    known, src = tmdb.poster_cached(item["url"], POSTER) if item.get("url") else (True, None)
     if known:
         put(src)
-        if on_meta and meta:
-            k2, m = tmdb.meta_cached(item["url"])
-            if k2:
-                if m and (m["rating"] or m["genres"]):
-                    on_meta(m["rating"], m["genres"], False)
-                return box
-        else:
+        if not (on_meta and meta) or meta_now():
             return box
     if not tmdb.enabled() or not item.get("url"):
         return box
     if _slots is None:
-        _slots = asyncio.Semaphore(4)
+        _slots = asyncio.Semaphore(6)
 
     async def look():
         import core
@@ -135,14 +136,14 @@ def tmdb_still(page, item, width, on_meta=None, meta=True):
             async with _slots:
                 if not known:
                     url = await asyncio.wait_for(asyncio.to_thread(
-                        tmdb.backdrop, item["url"], item.get("title", ""), item.get("orig", ""),
-                        item.get("year", ""), STILL), 15)
+                        tmdb.poster, item["url"], item.get("title", ""), item.get("orig", ""),
+                        item.get("year", ""), POSTER), 15)
                     put(url)
                     try:
                         box.update()
                     except Exception:
                         return
-                if on_meta and meta:
+                if on_meta and meta:  # рейтинг і жанри — з того ж пошуку (назви жанрів раз)
                     m = await asyncio.wait_for(asyncio.to_thread(
                         tmdb.meta, item["url"], item.get("title", ""), item.get("orig", ""),
                         item.get("year", ""), core.site_meta), 15)
@@ -156,19 +157,19 @@ def tmdb_still(page, item, width, on_meta=None, meta=True):
 
 
 def poster_card(page, item, on_open, width, meta=True, autofocus=False):
-    """Афіша: кадр 16:9 (TMDB), під ним назва й рядок «★ 7.6 · Драма». Вибрана — у рамці."""
-    title = ft.Text(item.get("title") or "", size=T.S_BODY, weight=ft.FontWeight.W_700,
+    """Афіша: вертикальний постер TMDB, під ним назва й «★ 7.6 · Драма». Вибрана — у рамці."""
+    title = ft.Text(item.get("title") or "", size=T.S_SMALL + 1, weight=ft.FontWeight.W_700,
                     color=T.INK, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
-    sub = ft.Text(item.get("orig") or " ", size=T.S_SMALL, color=T.DIM, max_lines=1,
+    sub = ft.Text(item.get("orig") or " ", size=T.S_SMALL - 1, color=T.DIM, max_lines=1,
                   overflow=ft.TextOverflow.ELLIPSIS)
     age = ft.Container(
         ft.Text(item.get("age") or "", size=T.S_SMALL - 2, weight=ft.FontWeight.W_800,
                 color=T.LETTER), bgcolor=T.BOARD,
         padding=ft.Padding.symmetric(horizontal=5, vertical=1),
-        border_radius=2, visible=bool(item.get("age")), left=8, top=8)
+        border_radius=2, visible=bool(item.get("age")), left=6, top=6)
 
     def show(rating, genres, late):
-        bits = ([f"★ {rating:.1f}"] if rating else []) + list(genres[:2])
+        bits = ([f"★ {rating:.1f}"] if rating else []) + list(genres[:1])
         sub.value = "  ·  ".join(bits) or sub.value
         if late:
             try:
@@ -176,21 +177,8 @@ def poster_card(page, item, on_open, width, meta=True, autofocus=False):
             except Exception:
                 pass
 
-    pic = ft.Stack([tmdb_still(page, item, width, show, meta), age],
-                   width=width, height=width / (16 / 9))
-    body = ft.Column([pic, ft.Container(ft.Column([title, sub], spacing=2, tight=True),
-                                        padding=ft.Padding.only(left=2, right=2, top=8))],
-                     spacing=0, width=width, tight=True)
-    return ft.Button(
-        content=body, on_click=_click(lambda e: on_open(item)), autofocus=autofocus,
-        style=ft.ButtonStyle(
-            bgcolor=ft.Colors.TRANSPARENT, elevation=0, padding=6,
-            overlay_color=ft.Colors.TRANSPARENT, shadow_color=ft.Colors.TRANSPARENT,
-            side={CTRL.FOCUSED: ft.BorderSide(4, T.BOARD), CTRL.HOVERED: ft.BorderSide(2, T.BOARD),
-                  CTRL.DEFAULT: ft.BorderSide(0, ft.Colors.TRANSPARENT)},
-            shape=ft.RoundedRectangleBorder(radius=6), animation_duration=0))
-
-
+    pic = ft.Stack([tmdb_poster(page, item, width, show, meta), age],
+                   width=width, height=width / RATIO)
 def board(rows, label_text=None):
     """Табло: світла панель у рамці, рядки розділені лініями."""
     panel = ft.Container(ft.Column(rows, spacing=0), bgcolor=T.BOARD, border_radius=3,
@@ -216,8 +204,8 @@ def board_row(cells, on_click=None, last=False, autofocus=False, height=None, tr
                     style=ft.TextStyle(letter_spacing=size * (0.04 if kind == "main" else 0.06)))
         texts.append((t, color))
         row_cells.append(ft.Container(t, expand=share or 1))
-    if T.MOBILE:
-        # телефон: назва — першим рядком, решта (серія, скільки лишилось) — під нею
+    if T.MOBILE or T.TV:
+        # телефон і TV: назва — першим рядком, решта (серія, скільки лишилось) — під нею
         extra = [c.content for c in row_cells[1:] if c.content.value]
         body = ft.Column([row_cells[0].content,
                           ft.Row(extra, spacing=12, wrap=True, run_spacing=2)],
@@ -269,7 +257,7 @@ def spinner(size=22):
 
 def placeholder_row(count, width):
     """Сірі «афіші», поки вантажиться поличка."""
-    return [ft.Container(width=width + 12, height=width / (16 / 9) + 64,
+    return [ft.Container(width=width + 12, height=width / RATIO + 58,
                          content=ft.Container(bgcolor=T.WALL_2, border_radius=3,
-                                              margin=ft.Margin.only(left=6, top=6, right=6, bottom=58)))
+                                              margin=ft.Margin.only(left=6, top=6, right=6, bottom=52)))
             for _ in range(count)]

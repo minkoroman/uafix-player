@@ -32,6 +32,7 @@ _ids = {}  # url сторінки → (kind, id) у TMDB (у тому ж фай�
 _meta = {}  # url сторінки → {"r": рейтинг або None, "g": [id жанрів]} ("__meta__")
 _genres = {}  # id жанру → назва українською ("__genres__")
 _years = {}  # url сторінки → рік знайденого в TMDB ("__years__"): звірити з роком сайту
+_posters = {}  # url сторінки → шлях вертикального постера ("" — не знайдено) ("__posters__")
 
 
 def enabled():
@@ -57,6 +58,7 @@ def _load():
         _meta.update(_cache.pop("__meta__", {}))
         _genres.update({int(k): v for k, v in _cache.pop("__genres__", {}).items()})
         _years.update(_cache.pop("__years__", {}))
+        _posters.update(_cache.pop("__posters__", {}))
     return _cache
 
 
@@ -64,7 +66,8 @@ def _save():
     try:
         with open(_cache_file(), "w", encoding="utf-8") as f:
             json.dump(dict(_cache, __ids__=_ids, __meta__=_meta, __genres__=_genres,
-                           __years__=_years, __v__=CACHE_V), f, ensure_ascii=False)
+                           __years__=_years, __posters__=_posters, __v__=CACHE_V), f,
+                      ensure_ascii=False)
     except Exception:
         pass
 
@@ -165,39 +168,90 @@ def cached(url, size="w1280"):
         return True, IMG + size + cache[url] if cache[url] else None
 
 
+def _stale(url, year):
+    """Знайдене без року (з картки) не збігається з роком сайту (±1) — шукати знову."""
+    known = _years.get(url, "")
+    return bool(year and known and year.isdigit() and known.isdigit()
+                and abs(int(year) - int(known)) > 1)
+
+
+def _lookup(url, title, orig, year):
+    """Один пошук тайтлу: id, рік, рейтинг і жанри, вертикальний постер — усе з результату
+    пошуку (без додаткових запитів). → (kind, результат) або None; мережа — виняток."""
+    kinds = ("movie", "tv") if "/films/" in url else ("tv", "movie")
+    for kind in kinds:
+        hit = _newest(kind, title, orig) if not year else None
+        for q in _queries(title, orig) if not hit else ():
+            hit = _search(kind, q, year)
+            if hit:
+                break
+        if hit:
+            with _lock:
+                _ids[url] = (kind, hit["id"])
+                _meta[url] = _meta_of(hit)
+                _years[url] = _hit_year(hit)
+                _posters[url] = hit.get("poster_path") or ""
+            return kind, hit
+    with _lock:
+        _posters[url] = ""
+    return None
+
+
+def poster_cached(url, size="w342"):
+    """(чи вже шукали, URL вертикального постера або None) — без мережі."""
+    if not TMDB_TOKEN:
+        return True, None
+    with _lock:
+        _load()
+        if url not in _posters:
+            return False, None
+        return True, IMG + size + _posters[url] if _posters[url] else None
+
+
+def poster(url, title, orig="", year="", size="w342"):
+    """Вертикальний постер для картки (один запит пошуку). Блокує — з потоку."""
+    if not TMDB_TOKEN or not title:
+        return None
+    year = str(year or "")[:4]
+    with _lock:
+        _load()
+        if url in _posters and not _stale(url, year):
+            return IMG + size + _posters[url] if _posters[url] else None
+    try:
+        _lookup(url, title, orig, year)
+    except Exception:
+        return None  # мережа/ліміт — не запам'ятовуємо
+    with _lock:
+        _save()
+        return IMG + size + _posters[url] if _posters.get(url) else None
+
+
 def backdrop(url, title, orig="", year="", size="w1280"):
-    """URL офіційного широкого кадру для тайтлу сайту або None. Блокує (мережа) —
-    викликати з потоку."""
+    """URL офіційного широкого кадру без тексту для тайтлу сайту або None. Блокує (мережа) —
+    викликати з потоку. Тайтл, уже знайдений для картки, повторно не шукається."""
     if not TMDB_TOKEN or not title:
         return None
     year = str(year or "")[:4]
     with _lock:
         cache = _load()
-        known = _years.get(url, "")
-        # знайдене без року (з картки) не збігається з роком сайту — шукаємо знову з роком
-        stale = bool(year and known and year.isdigit() and known.isdigit()
-                     and abs(int(year) - int(known)) > 1)
+        stale = _stale(url, year)
         if url in cache and not stale:
             path = cache[url]
             return IMG + size + path if path else None
         if stale:
-            _ids.pop(url, None)
-            _meta.pop(url, None)
-    kinds = ("movie", "tv") if "/films/" in url else ("tv", "movie")
+            for d in (_ids, _meta, _posters):
+                d.pop(url, None)
+        found = _ids.get(url)
     path = ""
     try:
-        for kind in kinds:
-            hit = _newest(kind, title, orig) if not year else None
-            for q in _queries(title, orig) if not hit else ():
-                hit = _search(kind, q, year)
-                if hit:
-                    break
-            if hit:
+        if found:  # знайдено раніше (для картки) — без повторного пошуку
+            path = _best_backdrop(found[0], found[1], None) or \
+                (_get(f"/{found[0]}/{found[1]}").get("backdrop_path") or "")
+        else:
+            res = _lookup(url, title, orig, year)
+            if res:
+                kind, hit = res
                 path = _best_backdrop(kind, hit["id"], hit.get("backdrop_path"))
-                _ids[url] = (kind, hit["id"])
-                _meta[url] = _meta_of(hit)
-                _years[url] = _hit_year(hit)
-                break
     except Exception:
         return None  # мережа/ліміт — не запам'ятовуємо, спробуємо наступного разу
     with _lock:
