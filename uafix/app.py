@@ -73,6 +73,8 @@ class App:
         await self.store.load()
         core.ABROAD["enabled"] = bool(self.store.settings.get("abroad", True))
         core.ABROAD["get_proxy"] = self.tor_proxy
+        if not self.android:  # старі версії Tor і запасні теки даних (як у 1.x)
+            page.run_thread(tor_runner.cleanup_old)
         page.run_task(self.store.sync_loop)
         from .updates import Updates
         from .notices import Notices

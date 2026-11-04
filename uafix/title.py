@@ -95,10 +95,37 @@ class TitleScreen:
         page = app.page
 
         kit.hold_background(True)  # постери головної чекають, поки шукаємо відео
+        loading = {"on": True}
+        page.run_task(self.abroad_hint, loading)
         try:
             await self.load(page, autoplay)
         finally:
+            loading["on"] = False
             kit.hold_background(False)
+
+    _hinted = False  # підказку про обхід — раз за запуск
+
+    async def abroad_hint(self, loading):
+        """Перший фільм в обхід регіональних обмежень відкривається довше (запуск Tor) —
+        пояснюємо один раз, щоб не здавалося, що все зависло."""
+        for _ in range(40):
+            await asyncio.sleep(0.25)
+            if not loading["on"] or TitleScreen._hinted:
+                return
+            if core.GEO["site"] and not core.ABROAD.get("circuit"):
+                TitleScreen._hinted = True
+                self.app.toast("Фільм обмежено у вашому регіоні — відкриваю в обхід. "
+                               "Перший раз це до хвилини")
+                return
+
+    @staticmethod
+    def blocked_text():
+        """Чому відео нема за кордоном (як у 1.x)."""
+        if not core.ABROAD["enabled"]:
+            return "Недоступно у вашому регіоні. Увімкніть «Обхід регіональних обмежень» у налаштуваннях"
+        if core.ABROAD.get("circuit") and not all(core.GEO["cdn"].values()):
+            return "Недоступно у вашому регіоні: відеосервер цього фільму не віддає відео за кордон"
+        return "Недоступно у вашому регіоні: не вдалося підключитися в обхід. Спробуйте трохи пізніше"
 
     async def load(self, page, autoplay):
         # ── опис зі сторінки сайту; потоки шукаємо одразу ж, паралельно з розбором опису
@@ -133,7 +160,7 @@ class TitleScreen:
         if not any(s["episodes"] for s in self.seasons):
             blocked = core.GEO["site"] or core.GEO["blocked"]
             self.status.controls = [T.text(
-                "Недоступно у вашому регіоні" if blocked else "Відео ще не додали на сайт",
+                self.blocked_text() if blocked else "Відео ще не додали на сайт",
                 color=T.SIGNAL)]
             self.update()
             return
@@ -383,7 +410,7 @@ class TitleScreen:
             return
         if not sources:
             blocked = core.GEO["site"] or core.GEO["blocked"]
-            self.app.toast("Недоступно у вашому регіоні" if blocked else
+            self.app.toast(self.blocked_text() if blocked else
                            "Для цієї серії відео не знайдено", error=True)
             return
         if pos is None:

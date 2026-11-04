@@ -62,7 +62,28 @@ def _load():
     return _cache
 
 
+_save_timer = None
+
+
 def _save():
+    """Запис кешу — відкладено й одним разом (не частіше ніж раз на 2 с): під час першого
+    відкриття розділу картки шукаються десятками, і запис усього файлу після кожної на ТВ
+    забирав секунди процесора. Викликається під _lock."""
+    global _save_timer
+    if _save_timer is None:
+        _save_timer = threading.Timer(2.0, _flush)
+        _save_timer.daemon = True
+        _save_timer.start()
+
+
+def _flush():
+    global _save_timer
+    with _lock:
+        _save_timer = None
+        _write()
+
+
+def _write():
     try:
         with open(_cache_file(), "w", encoding="utf-8") as f:
             json.dump(dict(_cache, __ids__=_ids, __meta__=_meta, __genres__=_genres,
