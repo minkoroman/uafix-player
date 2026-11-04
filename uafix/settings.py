@@ -14,7 +14,6 @@ HWDEC = [("auto", "Апаратне"), ("copy", "Апаратне сумісне
 PLAYER = [("ask", "Запитувати"), ("builtin", "Вбудований"), ("external", "Інша програма")]
 THEMES = [("dark", "Темна"), ("light", "Світла")]
 SUB_SIZES = [("0.75", "Малі"), ("1.0", "Середні"), ("1.3", "Великі"), ("1.6", "Дуже великі")]
-FIT = [("auto", "Авто"), ("contain", "Вписати"), ("cover", "Заповнити"), ("fill", "Розтягнути")]
 
 
 class Settings:
@@ -87,8 +86,6 @@ class Settings:
                  self.choice("Якість відео", "quality", QUALITY),
                  self.toggle("Пропускати заставку UAFlix", "skip_intro"),
                  self.choice("Розмір субтитрів", "sub_scale", SUB_SIZES),
-                 self.choice("Масштаб кадру", "fit", FIT,
-                             "«Авто»: на телефоні — на весь екран, деінде — вписати"),
                  self.choice("Гучність", "volume_boost", BOOST,
                              "Підсилення тихих фільмів"),
                  self.choice("Декодування відео", "hwdec", HWDEC,

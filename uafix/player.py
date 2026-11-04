@@ -78,7 +78,18 @@ class Player:
         what = self.ep["label"] if len(self.title.all_episodes()) > 1 else ""
         self.time_text = T.text("0:00", size=T.S_SMALL + 1, color="#F1E6CC",
                                 weight=ft.FontWeight.W_600)
-        self.bar = ft.ProgressBar(value=0, color=T.SIGNAL, bgcolor="#33F1E6CC", bar_height=4)
+        self.scrubbing = False
+        if self.app.tv:  # пульт: перемотка кнопками ±10 / +30 с, смужка — лише показ
+            self.bar = ft.ProgressBar(value=0, color=T.SIGNAL, bgcolor="#33F1E6CC", bar_height=4)
+            bar_box = self.bar
+        else:  # мишка / палець: клік чи перетягування по смужці — перемотка
+            self.bar = ft.Slider(value=0, min=0, max=1, active_color=T.SIGNAL,
+                                 inactive_color="#33F1E6CC", thumb_color="#F1E6CC",
+                                 overlay_color=ft.Colors.TRANSPARENT, padding=0,
+                                 mouse_cursor=ft.MouseCursor.CLICK,
+                                 on_change_start=self.scrub_start, on_change=self.scrub_move,
+                                 on_change_end=self.scrub_end)
+            bar_box = ft.Container(self.bar, height=18)
         self.play_btn = kit.plate(ft.Icon(ft.Icons.PAUSE_ROUNDED, size=28),
                                   on_click=lambda e: self.app.page.run_task(self.toggle),
                                   kind="glass", pad=(18, 12))
@@ -109,7 +120,7 @@ class Player:
                                        end=ft.Alignment.BOTTOM_CENTER,
                                        colors=["#CC000000", "#00000000"]))
         bottom = ft.Container(ft.Column([
-            self.bar,
+            bar_box,
             ft.Row([ft.Row(buttons, spacing=10), ft.Row(options + [self.time_text], spacing=10)],
                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=self.app.mobile,
                    vertical_alignment=ft.CrossAxisAlignment.CENTER)], spacing=14),
@@ -158,11 +169,68 @@ class Player:
             self.video.fit = ft.BoxFit.COVER
             self.top.visible = self.bottom.visible = False
 
+    # ── перемотка мишкою по смужці
+    def scrub_start(self, e):
+        kit.quiet()
+        self.scrubbing = True
+        self.show_overlay(False)
+
+    def scrub_move(self, e):
+        kit.quiet()
+        self.shown_at = time.monotonic()
+        if self.dur:
+            pos = int(float(e.control.value) * self.dur)
+            self.time_text.value = f"{fmt_time(pos)} / {fmt_time(self.dur)}"
+            self.time_text.update()
+
+    def scrub_end(self, e):
+        kit.quiet()
+        if self.dur:
+            pos = int(float(e.control.value) * self.dur)
+            self.app.page.run_task(self.seek_to, pos)
+        self.scrubbing = False
+
+    async def seek_to(self, ms):
+        try:
+            await self.video.seek(max(0, int(ms)))
+        except Exception:
+            pass
+
+    # ── масштаб кадру: кнопка в плеєрі перемикає по колу й запам'ятовує
+    FITS = [("contain", "Вписати", ft.Icons.FIT_SCREEN_ROUNDED),
+            ("cover", "Заповнити", ft.Icons.CROP_FREE_ROUNDED),
+            ("fill", "Розтягнути", ft.Icons.OPEN_IN_FULL_ROUNDED)]
+
+    def fit_key(self):
+        mode = self.app.store.settings.get("fit") or "auto"
+        if mode not in [k for k, _, _ in self.FITS]:  # «авто» зі старих налаштувань
+            mode = "cover" if self.app.mobile else "contain"
+        return mode
+
+    def cycle_fit(self, e=None):
+        kit.quiet()
+        keys = [k for k, _, _ in self.FITS]
+        mode = keys[(keys.index(self.fit_key()) + 1) % len(keys)]
+        self.app.store.set("fit", mode)
+        if not self.mini_on:
+            self.video.fit = self.fit_mode()
+            self.video.update()
+        self.refresh_fit_btn()
+        self.show_overlay(False)
+
+    def refresh_fit_btn(self):
+        _, name, icon = next(f for f in self.FITS if f[0] == self.fit_key())
+        self.fit_btn.content.controls[0].icon = icon
+        self.fit_btn.content.controls[1].value = name.upper()
+        self.fit_btn.tooltip = f"Масштаб: {name.lower()}"
+        try:
+            self.fit_btn.update()
+        except Exception:
+            pass
+
     def fit_mode(self):
         """Масштаб кадру з налаштувань; «Авто» — на телефоні заповнити екран, деінде вписати."""
-        mode = self.app.store.settings.get("fit") or "auto"
-        if mode == "auto":
-            mode = "cover" if self.app.mobile else "contain"
+        mode = self.fit_key()
         return {"cover": ft.BoxFit.COVER, "fill": ft.BoxFit.FILL}.get(mode, ft.BoxFit.CONTAIN)
 
     # ── панель
@@ -214,11 +282,13 @@ class Player:
                 self.set_play_icon(playing)
                 self.pip(playing)
             if self.overlay.opacity == 1:
-                self.time_text.value = f"{fmt_time(pos)} / {fmt_time(dur)}" if dur else fmt_time(pos)
-                self.bar.value = pos / dur if dur else 0
+                if not self.scrubbing:
+                    self.time_text.value = (f"{fmt_time(pos)} / {fmt_time(dur)}" if dur
+                                            else fmt_time(pos))
+                    self.bar.value = min(1, pos / dur) if dur else 0
+                    self.time_text.update()
+                    self.bar.update()
                 self.set_play_icon(playing)
-                self.time_text.update()
-                self.bar.update()
                 if playing and time.monotonic() - self.shown_at > 4:
                     self.hide_overlay()
             if dur and pos > 1000 and time.monotonic() - saved_at > 10:
@@ -282,6 +352,10 @@ class Player:
                                      on_click=lambda e: self.choose_subs(), kind="glass",
                                      pad=(14, 12))
             out.append(self.sub_btn)
+        _, name, icon = next(f for f in self.FITS if f[0] == self.fit_key())
+        self.fit_btn = kit.plate(kit.label(name, icon), on_click=self.cycle_fit, kind="glass",
+                                 pad=(14, 12), tooltip=f"Масштаб: {name.lower()}")
+        out.append(self.fit_btn)
         variants = core._VARIANTS.get(self.entry["url"]) or {}
         if len(variants) > 1:
             q = core.pick_quality(variants, self.app.store.settings.get("quality") or "1080")
