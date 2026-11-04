@@ -26,7 +26,7 @@ API = "https://api.themoviedb.org/3"
 IMG = "https://image.tmdb.org/t/p/"
 _session = requests.Session()
 _lock = threading.Lock()
-CACHE_V = 3  # версія кешу: 3 — спершу українська назва, потім оригінальна; рік знайденого
+CACHE_V = 4  # версія кешу: 4 — без року: найновіший збіг і за укр., і за оригінальною назвою
 _cache = None  # url сторінки на сайті → шлях кадру в TMDB ("" — не знайдено)
 _ids = {}  # url сторінки → (kind, id) у TMDB (у тому ж файлі під ключем "__ids__")
 _meta = {}  # url сторінки → {"r": рейтинг або None, "g": [id жанрів]} ("__meta__")
@@ -79,6 +79,30 @@ def _get(path, **params):
 
 def _norm(s):
     return re.sub(r"[^\w]+", " ", (s or "").lower()).strip()
+
+
+def _matches(kind, query):
+    """Результати пошуку без року, чия назва (укр. чи оригінальна) точно збігається."""
+    res = _get(f"/search/{kind}", query=query, language="uk-UA",
+               include_adult="false").get("results", [])
+    q = _norm(query)
+    return [r for r in res if q in (_norm(r.get("title") or r.get("name")),
+                                    _norm(r.get("original_title") or r.get("original_name")))]
+
+
+def _newest(kind, title, orig):
+    """Рік невідомий (картка каталогу): точні збіги і за укр., і за оригінальною назвою —
+    найновіший (на сайті здебільшого свіже: «Оселя зла» 2026, а не 2002). Новий фільм у
+    TMDB часто ще без українського перекладу назви — тому лише за укр. назвою його не видно."""
+    seen, found = set(), []
+    for q in _queries(title, orig):
+        for r in _matches(kind, q):
+            if r["id"] not in seen:
+                seen.add(r["id"])
+                found.append(r)
+    found.sort(key=lambda r: r.get("release_date") or r.get("first_air_date") or "",
+               reverse=True)
+    return found[0] if found else None
 
 
 def _search(kind, query, year):
@@ -163,8 +187,8 @@ def backdrop(url, title, orig="", year="", size="w1280"):
     path = ""
     try:
         for kind in kinds:
-            hit = None
-            for q in _queries(title, orig):
+            hit = _newest(kind, title, orig) if not year else None
+            for q in _queries(title, orig) if not hit else ():
                 hit = _search(kind, q, year)
                 if hit:
                     break

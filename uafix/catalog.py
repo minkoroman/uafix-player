@@ -16,18 +16,19 @@ class Grid:
         self.title = T.caps(title, size=T.S_HEAD + 8 if not app.mobile else T.S_HEAD + 4)
         self.status = T.text("", size=T.S_SMALL, color=T.DIM)
         self.grid = ft.Row(wrap=True, spacing=4, run_spacing=10)
-        self.more = kit.plate(kit.label("Показати ще"), on_click=lambda e: self.next_page())
-        self.more.visible = False
         self.page_no = 0
         self.busy = False
         self.extra = []  # що показати над сіткою (поле пошуку)
+        self.has_more = False
+        # наступна сторінка — сама, коли до кінця лишається приблизно екран
         self.body = ft.ListView(expand=True, padding=ft.Padding.only(
-            left=app.side - 6, right=app.side - 6, top=28, bottom=40), spacing=14)
+            left=app.side - 6, right=app.side - 6, top=28, bottom=40), spacing=14,
+            scroll_interval=200, on_scroll=self.on_scroll)
 
     def view(self):
         self.body.controls = [ft.Container(self.title, padding=ft.Padding.only(left=6)),
                               *self.extra, ft.Container(self.status, padding=ft.Padding.only(left=6)),
-                              self.grid, ft.Container(self.more, padding=ft.Padding.only(left=6))]
+                              self.grid]
         return self.body
 
     def fetch_page(self, n):
@@ -36,7 +37,14 @@ class Grid:
     def reset(self):
         self.grid.controls = []
         self.page_no = 0
-        self.more.visible = False
+        self.has_more = False
+
+    def on_scroll(self, e: ft.OnScrollEvent):
+        kit.quiet()
+        # extent_after — скільки ще прокручувати до кінця
+        if self.has_more and not self.busy and e.extent_after is not None and \
+                e.extent_after < 900:
+            self.next_page()
 
     def next_page(self):
         if not self.busy:
@@ -44,8 +52,7 @@ class Grid:
 
     async def load_next(self):
         self.busy = True
-        self.status.value = "Завантажую…"
-        self.more.visible = False
+        self.status.value = "Завантажую…" if not self.grid.controls else ""
         try:
             self.body.update()
         except Exception:
@@ -66,7 +73,7 @@ class Grid:
                                    autofocus=self.app.tv and not self.grid.controls)
             card.data = it["url"]
             self.grid.controls.append(card)
-        self.more.visible = len(items) >= 10
+        self.has_more = len(items) >= 10
         self.busy = False
         try:
             self.body.update()
