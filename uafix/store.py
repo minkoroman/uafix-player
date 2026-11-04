@@ -56,6 +56,13 @@ class Store:
                     setattr(self, attr, json.loads(raw))
             except Exception:
                 pass
+        try:  # ключі спарювання AirPlay
+            raw = await self.prefs.get("airplay_creds")
+            if raw:
+                import airplay
+                airplay.CREDENTIALS.update(json.loads(raw))
+        except Exception:
+            pass
         try:
             raw = await self.prefs.get("voice_titles")
             if raw:

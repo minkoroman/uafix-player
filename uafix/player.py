@@ -230,6 +230,12 @@ class Player:
     def option_buttons(self):
         """Плашки праворуч: натискання — наступне значення."""
         out = []
+        if not self.app.tv:  # телевізор сам і є екраном — транслювати з нього нікуди
+            from .casting import Casting
+            self.casting = Casting(self)
+            out.append(kit.plate(ft.Icon(ft.Icons.CAST_ROUNDED, size=24),
+                                 on_click=lambda e: self.app.page.run_task(self.casting.open),
+                                 kind="glass", pad=(14, 12), tooltip="Транслювати на телевізор"))
         if len(set(self.voices())) > 1:
             out.append(kit.plate(kit.label(self.voice, ft.Icons.MIC_ROUNDED),
                                  on_click=lambda e: self.app.page.run_task(self.next_voice),
