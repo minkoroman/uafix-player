@@ -75,16 +75,79 @@ class Grid:
 
 
 class Catalog(Grid):
+    """Розділ сайту з фільтрами (жанр, країна, сортування… — як на сайті)."""
+
     def __init__(self, app, name, path):
         super().__init__(app, name)
         self.path = path
+        self.filters = []   # [{field, title, options}]
+        self.chosen = {}    # field → value
+        self.filter_row = ft.Row(wrap=True, spacing=8, run_spacing=8)
+        self.extra = [ft.Container(self.filter_row, padding=ft.Padding.only(left=6, right=6))]
 
     def fetch_page(self, n):
+        if self.chosen:
+            return core.catalog_filtered(self.path, n, dict(self.chosen))
         return core.parse_catalog(core.fetch(core.catalog_url(self.path, n)))
 
     def shown(self):
         if not self.page_no and not self.busy:
             self.next_page()
+            self.app.page.run_task(self.load_filters)
+
+    async def load_filters(self):
+        try:
+            self.filters = await asyncio.to_thread(core.section_filters, self.path)
+        except Exception:
+            self.filters = []
+        self.render_filters()
+
+    def render_filters(self):
+        plates = []
+        for f in self.filters:
+            value = self.chosen.get(f["field"])
+            name = dict(f["options"]).get(value, "Усі") if value else "Усі"
+            plates.append(kit.plate(kit.label(f"{f['title']}: {name}"),
+                                    on_click=lambda e, f=f: self.pick(f),
+                                    kind="lit" if value else "plain", pad=(14, 10)))
+        if self.chosen:
+            plates.append(kit.plate(kit.label("Скинути", ft.Icons.CLOSE_ROUNDED),
+                                    on_click=lambda e: self.apply({}), pad=(14, 10)))
+        self.filter_row.controls = plates
+        try:
+            self.filter_row.update()
+        except Exception:
+            pass
+
+    def pick(self, f):
+        """Вікно з варіантами фільтра — плашками (зручно пультом)."""
+        cur = self.chosen.get(f["field"])
+
+        def choose(value):
+            self.app.page.pop_dialog()
+            chosen = dict(self.chosen)
+            if value is None:
+                chosen.pop(f["field"], None)
+            else:
+                chosen[f["field"]] = value
+            self.apply(chosen)
+
+        opts = [(None, "Усі")] + list(f["options"])
+        plates = [kit.plate(kit.label(label), on_click=lambda e, v=v: choose(v),
+                            kind="lit" if v == cur else "plain", pad=(14, 10),
+                            autofocus=v == cur)
+                  for v, label in opts]
+        self.app.page.show_dialog(ft.AlertDialog(
+            bgcolor=T.WALL, shape=ft.RoundedRectangleBorder(radius=4),
+            title=T.caps(f["title"], size=T.S_HEAD),
+            content=ft.Container(ft.Row(plates, wrap=True, spacing=8, run_spacing=8,
+                                        scroll=ft.ScrollMode.AUTO), width=640)))
+
+    def apply(self, chosen):
+        self.chosen = chosen
+        self.render_filters()
+        self.reset()
+        self.next_page()
 
 
 class Search(Grid):
