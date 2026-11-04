@@ -185,8 +185,12 @@ class Home:
                                  alignment=ft.Alignment.CENTER),
                     on_click=lambda e: self.app.show(path, name),
                     on_focus=lambda f, k=f"shelf-{path}", b=box: f and self.focused(k, b[0])),
-                    padding=ft.Padding.only(left=6, right=6, top=6)))
+                    padding=ft.Padding.only(left=7, right=7, top=7),
+                    alignment=ft.Alignment.TOP_CENTER))  # без цього ряд розтягував її на всю висоту
                 box.append(cards[-1].content)
+                # «стінка» після «Усі»: вправо з кінця ряду фокус лишається тут (інакше Flutter
+                # знаходив найближче праворуч — картку сусіднього ряду)
+                cards.append(self.app.focus_wall(lambda b=box: b[0], width=2))
             row.controls = cards or [ft.Container(T.text("Не вдалося завантажити", color=T.DIM),
                                                   padding=20)]
             try:
