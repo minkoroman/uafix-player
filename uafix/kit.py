@@ -61,13 +61,15 @@ def plate(content, on_click=None, kind="plain", pad=(18, 14), radius=3, autofocu
             padding=ft.Padding.symmetric(horizontal=pad[0], vertical=pad[1])))
 
 
-def label(text, icon=None, size=None, weight=ft.FontWeight.W_700):
-    """Напис для плашки: великі літери, колір — від плашки."""
+def label(text, icon=None, size=None, weight=ft.FontWeight.W_700, left=False):
+    """Напис для плашки: великі літери, колір — від плашки. left — притиснути ліворуч
+    (у пунктах меню на всю ширину), інакше — по центру плашки."""
     size = size or T.S_SMALL
     parts = [ft.Icon(icon, size=size + 6)] if icon else []
     parts.append(ft.Text(text.upper(), size=size, weight=weight,
                          style=ft.TextStyle(letter_spacing=size * 0.1)))
-    return ft.Row(parts, spacing=10, tight=True, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+    return ft.Row(parts, spacing=10, tight=not left, alignment=ft.MainAxisAlignment.START,
+                  vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
 
 def cover(src):

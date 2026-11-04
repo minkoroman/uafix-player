@@ -58,6 +58,10 @@ class App:
             page.window.min_width, page.window.min_height = 760, 540
             page.window.bgcolor = T.FACADE
             page.update()
+            try:  # новий розмір — від старого лівого краю: вікно вилазило праворуч за екран
+                await page.window.center()
+            except Exception:
+                pass
         page.on_view_pop = lambda e: self.back()
         page.on_route_change = lambda e: (kit.quiet(), self.handle_link(e.route))
         page.on_keyboard_event = self.on_key
@@ -100,9 +104,11 @@ class App:
         self.rail_items = {}
         items = []
         for name, key, icon in NAV:
-            btn = kit.plate(kit.label(name, icon, size=T.S_SMALL + (2 if self.tv else 0)),
+            btn = kit.plate(kit.label(name, icon, size=T.S_SMALL + (2 if self.tv else 0),
+                                      left=True),
                             on_click=lambda e, k=key, n=name: self.show(k, n),
                             pad=(16, 16 if self.tv else 12))
+            btn.width = (260 if self.tv else 236) - 36  # на всю ширину меню, напис — ліворуч
             self.rail_items[key] = btn
             items.append(ft.Container(btn, width=float("inf")))
         mark = ft.Column([T.caps("UAFix", size=26, weight=ft.FontWeight.W_900, spacing=0.06),
