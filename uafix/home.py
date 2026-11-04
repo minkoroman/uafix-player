@@ -86,7 +86,11 @@ class Home:
                 T.caps("UAFix", size=26, weight=ft.FontWeight.W_900, spacing=0.06),
                 kit.kicker("кінотеатр українською")], spacing=14,
                 vertical_alignment=ft.CrossAxisAlignment.END),
-                padding=ft.Padding.only(left=app.side, right=app.side, top=22))]
+                padding=ft.Padding.only(left=app.side, right=app.side, top=22)),
+                # «стінка» на всю ширину: зайве «вгору» з першого ряду лишає фокус на місці,
+                # а не виводить його в ліве меню
+                app.focus_wall(lambda: self.last_focus)]
+        self.last_focus = None
         self.list = ft.ListView(
             top + [self.board_section, self.fav_new] + [col for col, _ in self.shelves] + [ft.Container(height=40)],
             expand=True, spacing=0)
@@ -128,7 +132,8 @@ class Home:
             rows.append(kit.board_row(
                 cells, on_click=lambda e, it=item: self.app.open_title(it),
                 last=i == len(items) - 1, trailing=remove,
-                on_focus=(lambda: self.reveal_row(None)) if self.app.tv else None))
+                on_focus=(lambda i=i: self.focused(None, rows[i].focus_target))
+                if self.app.tv else None))
         self.board_box.controls = [kit.board(rows, "Сьогодні в залі · Продовжити перегляд")] \
             if rows else []
         self.board_section.visible = bool(rows)
@@ -163,12 +168,15 @@ class Home:
             items = items[:14] if self.app.tv else items[:24]
             # TV: фокус на афіші — показати весь ряд разом із заголовком (інакше список
             # прокручувався рівно до картки, і підпис ряду ховався вгорі)
-            reveal = (lambda f, k=f"shelf-{path}": self.reveal_row(k) if f else None) \
-                if self.app.tv else None
-            cards = [kit.poster_card(self.app.page, it, self.app.open_title, w,
-                                     meta=self.app.store.settings.get("card_meta", True),
-                                     on_focus=reveal)
-                     for it in items]
+            cards = []
+            for it in items:
+                box = []
+                cards.append(kit.poster_card(
+                    self.app.page, it, self.app.open_title, w,
+                    meta=self.app.store.settings.get("card_meta", True),
+                    on_focus=(lambda f, k=f"shelf-{path}", b=box: f and self.focused(k, b[0]))
+                    if self.app.tv else None))
+                box.append(cards[-1])
             if self.app.tv and cards:  # замість «Усі» в заголовку — остання плашка в ряду
                 cards.append(ft.Container(kit.plate(
                     ft.Container(kit.label("Усі", ft.Icons.ARROW_FORWARD_ROUNDED),
@@ -225,6 +233,10 @@ class Home:
             self.fav_new.update()
         except Exception:
             pass
+
+    def focused(self, key, control):
+        self.last_focus = control
+        self.reveal_row(key)
 
     def reveal_row(self, key):
         """TV: ряд у фокусі — разом із заголовком. Табло (key=None) і перший ряд — на самий

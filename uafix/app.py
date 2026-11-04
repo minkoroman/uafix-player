@@ -120,7 +120,7 @@ class App:
                 lab.controls[-1].visible = False  # згорнуте: лише іконка
                 self.rail_texts.append(lab.controls[-1])
             btn = kit.plate(lab, on_click=lambda e, k=key, n=name: self.show(k, n),
-                            pad=(14, 11 if tv else 12),
+                            pad=(14, 8 if tv else 12),
                             on_focus=(lambda f, k=key: self.rail_focused(k, f)) if tv else None)
             btn.width = (RAIL_TV_MAX if tv else 236) - 32  # на всю ширину меню, напис — ліворуч
             self.rail_items[key] = btn
@@ -136,9 +136,9 @@ class App:
             items = [self.rail_wall(keys[0])] + items + [self.rail_wall(keys[-1])]
         self.rail_box = ft.Container(
             ft.Column([self.rail_mark, ft.Container(height=22 if not tv else 8)] + items,
-                      spacing=6, scroll=ft.ScrollMode.AUTO),
+                      spacing=2 if tv else 6, scroll=ft.ScrollMode.AUTO),
             width=RAIL_TV_MIN if tv else 236,
-            padding=ft.Padding.only(left=8 if tv else 16, right=8 if tv else 16, top=26),
+            padding=ft.Padding.only(left=8 if tv else 16, right=8 if tv else 16, top=12 if tv else 26),
             bgcolor=T.WALL, clip_behavior=ft.ClipBehavior.HARD_EDGE)  # без анімації: підписи
             #                                   не встигали за шириною й ламались у два рядки
         if tv:
@@ -156,10 +156,17 @@ class App:
 
     def rail_wall(self, edge_key):
         """Невидима кнопка-«стінка»: отримала фокус — одразу повертає його на край меню."""
+        return self.focus_wall(lambda: self.rail_items[edge_key])
+
+    def focus_wall(self, target):
+        """Невидима «стінка» на краю списку: фокус, що на неї потрапив, повертається на target()."""
+        def back(e):
+            kit.quiet()
+            t = target()
+            if t is not None:
+                self.page.run_task(self.keep_focus, t)
         return ft.Button(
-            content=ft.Container(height=2), on_click=lambda e: None, height=2,
-            on_focus=lambda e: (kit.quiet(), self.page.run_task(self.keep_focus,
-                                                                 self.rail_items[edge_key])),
+            content=ft.Container(height=2), on_click=lambda e: None, height=2, on_focus=back,
             style=ft.ButtonStyle(bgcolor=ft.Colors.TRANSPARENT, elevation=0, padding=0,
                                  overlay_color=ft.Colors.TRANSPARENT,
                                  shadow_color=ft.Colors.TRANSPARENT, animation_duration=0))
