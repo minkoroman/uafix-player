@@ -209,7 +209,8 @@ async def _prefetch_later(url, n):
 
 
 def poster_card(page, item, on_open, width, meta=True, autofocus=False, on_focus=None):
-    """Афіша: вертикальний постер TMDB, під ним назва й «★ 7.6 · Драма». Вибрана — у рамці."""
+    """Афіша: вертикальний постер TMDB, під ним назва й «★ 7.6 · Драма». Вибрана — рамка
+    навколо постера й назва табличкою."""
     title = ft.Text(item.get("title") or "", size=T.S_SMALL + 1, weight=ft.FontWeight.W_700,
                     color=T.INK, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
     sub = ft.Text(item.get("orig") or " ", size=T.S_SMALL - 1, color=T.DIM, max_lines=1,
@@ -247,20 +248,46 @@ def poster_card(page, item, on_open, width, meta=True, autofocus=False, on_focus
                        horizontal_alignment=ft.CrossAxisAlignment.START, left=6, top=6)
     pic = ft.Stack([tmdb_poster(page, item, width, show, meta), badges],
                    width=width, height=width / RATIO)
-    body = ft.Column([pic, ft.Container(ft.Column([title, sub], spacing=1, tight=True),
-                                        padding=ft.Padding.only(left=2, right=2, top=6))],
-                     spacing=0, width=width, tight=True)
+    # вибрана: світла рамка лише навколо постера, назва засвічується табличкою табло.
+    # Рамка й табличка є завжди (прозорі) — щоб у фокусі нічого не зсувалось.
+    frame = ft.Container(pic, border=ft.Border.all(3, ft.Colors.TRANSPARENT), border_radius=5)
+    plate_ = ft.Container(title, padding=ft.Padding.symmetric(horizontal=5, vertical=1),
+                          border_radius=2)
+    body = ft.Column([frame, ft.Container(
+        ft.Column([plate_, ft.Container(sub, padding=ft.Padding.only(left=5))],
+                  spacing=1, tight=True, horizontal_alignment=ft.CrossAxisAlignment.START),
+        padding=ft.Padding.only(top=5))],
+        spacing=0, width=width + 6, tight=True)
     url = item.get("url")
+    state = {"on": False}
+
+    def light(on):
+        if state["on"] == on:
+            return
+        state["on"] = on
+        frame.border = ft.Border.all(3, T.BOARD if on else ft.Colors.TRANSPARENT)
+        plate_.bgcolor = T.BOARD if on else None
+        title.color = T.LETTER if on else T.INK
+        try:
+            frame.update()
+            plate_.update()
+        except Exception:
+            pass
+
+    def hover(on):
+        quiet()
+        light(on)
+        _want(page, url, on)
     return ft.Button(
         content=body, on_click=_click(lambda e: on_open(item)), autofocus=autofocus,
-        on_focus=lambda e: (quiet(), _want(page, url, True), on_focus and on_focus(True)),
-        on_blur=(lambda e: (quiet(), on_focus(False))) if on_focus else None,
-        on_hover=lambda e: (quiet(), _want(page, url, e.data in (True, "true"))),
+        on_focus=lambda e: (quiet(), light(True), _want(page, url, True),
+                            on_focus and on_focus(True)),
+        on_blur=lambda e: (quiet(), light(False), on_focus and on_focus(False)),
+        on_hover=lambda e: hover(e.data in (True, "true")),
         style=ft.ButtonStyle(
-            bgcolor=ft.Colors.TRANSPARENT, elevation=0, padding=5,
+            bgcolor=ft.Colors.TRANSPARENT, elevation=0, padding=4,
             overlay_color=ft.Colors.TRANSPARENT, shadow_color=ft.Colors.TRANSPARENT,
-            side={CTRL.FOCUSED: ft.BorderSide(3, T.BOARD), CTRL.HOVERED: ft.BorderSide(2, T.BOARD),
-                  CTRL.DEFAULT: ft.BorderSide(0, ft.Colors.TRANSPARENT)},
+            side=ft.BorderSide(0, ft.Colors.TRANSPARENT),
             shape=ft.RoundedRectangleBorder(radius=5), animation_duration=0))
 
 
