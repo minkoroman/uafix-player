@@ -129,11 +129,17 @@ class Player:
         self.overlay = ft.Container(ft.Column([top, middle, bottom], spacing=0),
                                     left=0, top=0, right=0, bottom=0)
         self.overlay.opacity = 1
+        # міні-плеєр: вікно тягнеться за будь-яке місце кадру; маленька кругла «розгорнути»
+        self.mini_drag = ft.WindowDragArea(ft.Container(bgcolor="#01000000"), left=0, top=0,
+                                           right=0, bottom=0, visible=False)
         self.mini_btn = ft.Container(
-            kit.plate(ft.Icon(ft.Icons.OPEN_IN_FULL_ROUNDED, size=20),
-                      on_click=lambda e: self.app.page.run_task(self.toggle_mini), kind="glass",
-                      pad=(10, 8), tooltip="Розгорнути"), right=8, top=8, visible=False)
-        stack = ft.Stack([self.video, self.overlay, self.mini_btn], expand=True)
+            ft.IconButton(ft.Icons.OPEN_IN_FULL_ROUNDED, icon_size=16, icon_color="#F1E6CC",
+                          tooltip="Розгорнути", width=34, height=34,
+                          on_click=lambda e: (kit.quiet(), self.app.page.run_task(self.toggle_mini)),
+                          style=ft.ButtonStyle(bgcolor="#99000000", padding=0,
+                                               shape=ft.CircleBorder())),
+            right=10, top=10, visible=False)
+        stack = ft.Stack([self.video, self.overlay, self.mini_drag, self.mini_btn], expand=True)
         self.view = self.app.push("/play", stack, bgcolor="#000000")
         self.view.on_close = self.close
         self.app.key_handler = self.on_key
@@ -142,7 +148,8 @@ class Player:
         self.show_overlay(False)
         if mini:  # перезапуск з міні-плеєра (інша озвучка / якість) — лишитись маленьким
             self.mini_on = True
-            self.mini_btn.visible = True
+            self.mini_btn.visible = self.mini_drag.visible = True
+            self.video.fit = ft.BoxFit.COVER
             self.top.visible = self.bottom.visible = False
 
     # ── панель
@@ -287,10 +294,22 @@ class Player:
         self.app.page.show_dialog(ft.AlertDialog(
             bgcolor="#1C1815", shape=ft.RoundedRectangleBorder(radius=4),
             title=T.caps(title, size=T.S_HEAD, color="#F1E6CC"),
-            content=ft.Column([kit.plate(kit.label(name), on_click=lambda e, v=v: pick(v),
-                                         kind="lit" if v == current else "glass",
-                                         autofocus=v == current, expand=True)
-                               for v, name in options], tight=True, spacing=8, width=360)))
+            content=ft.Column([self.choice_plate(name, lambda e, v=v: pick(v), v == current)
+                               for v, name in options], tight=True, spacing=8, width=320)))
+
+    @staticmethod
+    def choice_plate(name, on_click, on):
+        """Рядок у вікні вибору: на всю ширину, звичайної висоти; вибраний — з ✓."""
+        btn = kit.plate(ft.Row([ft.Text(name.upper(), size=T.S_SMALL + 1, weight=ft.FontWeight.W_700,
+                                        style=ft.TextStyle(letter_spacing=1.2), expand=True),
+                                ft.Icon(ft.Icons.CHECK_ROUNDED, size=20, visible=on)]),
+                        on_click=on_click, kind="glass", autofocus=on, pad=(18, 14))
+        if on:  # вибране — світла плашка (на темному вікні «lit» зливався з тлом)
+            btn.style.bgcolor = {kit.CTRL.FOCUSED: "#F1E6CC", kit.CTRL.HOVERED: "#F1E6CC",
+                                 kit.CTRL.DEFAULT: "#F1E6CC"}
+            btn.style.color = btn.style.icon_color = {kit.CTRL.DEFAULT: "#1A1714"}
+        btn.width = 320
+        return btn
 
     def choose_voice(self):
         voices = list(dict.fromkeys(self.voices()))
@@ -399,19 +418,26 @@ class Player:
                 (w.left or 0, w.top or 0, w.width or 960, w.height or 540)
             ax, ay, aw, ah = area
             mw = max(480, int(aw / 3))
+            w.title_bar_hidden = True          # без смуги заголовка — лише кадр
+            w.title_bar_buttons_hidden = True
+            self.app.page.update()             # спершу без смуги — тоді розмір рівно 16:9
             w.min_width, w.min_height = 320, 180
             w.width, w.height = mw, int(mw * 9 / 16)
             w.left, w.top = ax + aw - mw - 16, ay + 16
             w.always_on_top = True
+            self.video.fit = ft.BoxFit.COVER   # кадр заповнює віконце, без чорних полів
             self.mini_on = True
         else:
             sv = self.mini_saved or {}
             w.always_on_top = False
+            w.title_bar_hidden = False
+            w.title_bar_buttons_hidden = False
+            self.video.fit = ft.BoxFit.CONTAIN
             for k, v in sv.items():
                 if v is not None:
                     setattr(w, k, v)
             self.mini_on = False
-        self.mini_btn.visible = self.mini_on
+        self.mini_btn.visible = self.mini_drag.visible = self.mini_on
         self.top.visible = self.bottom.visible = not self.mini_on and self.overlay.opacity == 1
         self.app.page.update()
 
