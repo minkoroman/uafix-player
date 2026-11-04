@@ -179,6 +179,19 @@ def poster_card(page, item, on_open, width, meta=True, autofocus=False):
 
     pic = ft.Stack([tmdb_poster(page, item, width, show, meta), age],
                    width=width, height=width / RATIO)
+    body = ft.Column([pic, ft.Container(ft.Column([title, sub], spacing=1, tight=True),
+                                        padding=ft.Padding.only(left=2, right=2, top=6))],
+                     spacing=0, width=width, tight=True)
+    return ft.Button(
+        content=body, on_click=_click(lambda e: on_open(item)), autofocus=autofocus,
+        style=ft.ButtonStyle(
+            bgcolor=ft.Colors.TRANSPARENT, elevation=0, padding=5,
+            overlay_color=ft.Colors.TRANSPARENT, shadow_color=ft.Colors.TRANSPARENT,
+            side={CTRL.FOCUSED: ft.BorderSide(3, T.BOARD), CTRL.HOVERED: ft.BorderSide(2, T.BOARD),
+                  CTRL.DEFAULT: ft.BorderSide(0, ft.Colors.TRANSPARENT)},
+            shape=ft.RoundedRectangleBorder(radius=5), animation_duration=0))
+
+
 def board(rows, label_text=None):
     """Табло: світла панель у рамці, рядки розділені лініями."""
     panel = ft.Container(ft.Column(rows, spacing=0), bgcolor=T.BOARD, border_radius=3,
