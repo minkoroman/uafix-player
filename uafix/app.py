@@ -108,7 +108,7 @@ class App:
             btn = kit.plate(kit.label(name, icon, size=T.S_SMALL, left=True),
                             on_click=lambda e, k=key, n=name: self.show(k, n),
                             pad=(14, 11 if self.tv else 12))
-            btn.width = (210 if self.tv else 236) - 32  # на всю ширину меню, напис — ліворуч
+            btn.width = (196 if self.tv else 236) - 32  # на всю ширину меню, напис — ліворуч
             self.rail_items[key] = btn
             items.append(ft.Container(btn, width=float("inf")))
         mark = ft.Column([T.caps("UAFix", size=22 if self.tv else 26, weight=ft.FontWeight.W_900,
@@ -117,7 +117,7 @@ class App:
         return ft.Container(
             ft.Column([mark, ft.Container(height=22)] + items, spacing=6,
                       scroll=ft.ScrollMode.AUTO),
-            width=210 if self.tv else 236, padding=ft.Padding.only(left=16, right=16, top=26),
+            width=196 if self.tv else 236, padding=ft.Padding.only(left=16, right=16, top=26),
             bgcolor=T.WALL)
 
     def bottom_bar(self):

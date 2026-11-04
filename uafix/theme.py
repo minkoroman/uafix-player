@@ -60,7 +60,7 @@ def configure(mobile):
     global S_BOARD, S_TITLE, S_HEAD, S_BODY, S_SMALL, S_KICK, MOBILE
     MOBILE = mobile
     if TV:
-        S_BOARD, S_TITLE, S_HEAD, S_BODY, S_SMALL, S_KICK = 19, 34, 15, 15, 12, 11
+        S_BOARD, S_TITLE, S_HEAD, S_BODY, S_SMALL, S_KICK = 17, 30, 14, 14, 11, 10
     elif mobile:
         S_BOARD, S_TITLE, S_HEAD, S_BODY, S_SMALL, S_KICK = 16, 28, 15, 15, 13, 11
 
