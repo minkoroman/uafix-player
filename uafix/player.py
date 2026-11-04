@@ -247,6 +247,10 @@ class Player:
                                      on_click=lambda e: self.next_subs(), kind="glass",
                                      pad=(14, 12))
             out.append(self.sub_btn)
+        if not self.app.tv and not self.app.mobile:  # ПК: на весь екран (і клавіша F)
+            out.append(kit.plate(ft.Icon(ft.Icons.FULLSCREEN_ROUNDED, size=24),
+                                 on_click=lambda e: self.fullscreen(), kind="glass",
+                                 pad=(14, 12), tooltip="На весь екран (F)"))
         variants = core._VARIANTS.get(self.entry["url"]) or {}
         if len(variants) > 1:
             q = core.pick_quality(variants, self.app.store.settings.get("quality") or "1080")
@@ -329,9 +333,20 @@ class Player:
         self.app.back()
         await self.title.play(si, ei, 0)
 
+    def fullscreen(self, on=None):
+        w = self.app.page.window
+        w.full_screen = (not w.full_screen) if on is None else on
+        self.app.page.update()
+
     async def on_key(self, key):
         if key in BACK_KEYS:
+            if not self.app.tv and not self.app.mobile and self.app.page.window.full_screen:
+                self.fullscreen(False)  # Escape — спершу вийти з повного екрана
+                return True
             self.app.back()
+            return True
+        if key.upper() == "F" and not self.app.tv and not self.app.mobile:
+            self.fullscreen()
             return True
         if key in ("Media Fast Forward", "Media Rewind"):
             await self.seek_by(30 if key == "Media Fast Forward" else -10)
@@ -357,6 +372,8 @@ class Player:
         """Вихід з плеєра: зберегти позицію й зупинити відео."""
         self.alive = False
         self.app.key_handler = None
+        if not self.app.tv and not self.app.mobile and self.app.page.window.full_screen:
+            self.fullscreen(False)
 
         if self.last[1]:
             self.save(*self.last)
