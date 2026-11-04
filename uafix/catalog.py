@@ -81,11 +81,21 @@ class Grid:
             pass
 
 
+# тематичні добірки розділу — їх немає серед жанрів фільтра сайту (окремі сторінки)
+COLLECTIONS = {
+    "/films/": [("Про кохання", "/films/love_films/"), ("Для підлітків", "/films/teen_films/"),
+                ("Про школу", "/films/school_films/")],
+    "/serials/": [("Про кохання", "/serials/pro_love/"), ("Про підлітків", "/serials/pro_pidlitkiv/"),
+                  ("Про школу", "/serials/school/")],
+}
+
+
 class Catalog(Grid):
-    """Розділ сайту з фільтрами (жанр, країна, сортування… — як на сайті)."""
+    """Розділ сайту з фільтрами (жанр, країна, сортування… — як на сайті) і добірками."""
 
     def __init__(self, app, name, path):
         super().__init__(app, name)
+        self.root = path    # сам розділ; path — він же або відкрита добірка
         self.path = path
         self.filters = []   # [{field, title, options}]
         self.chosen = {}    # field → value
@@ -111,6 +121,11 @@ class Catalog(Grid):
 
     def render_filters(self):
         plates = []
+        if self.root in COLLECTIONS:
+            name = next((n for n, p in COLLECTIONS[self.root] if p == self.path), None)
+            plates.append(kit.plate(kit.label(f"Добірка: {name or 'усі'}"),
+                                    on_click=lambda e: self.pick_collection(),
+                                    kind="lit" if name else "plain", pad=(14, 10)))
         for f in self.filters:
             value = self.chosen.get(f["field"])
             name = dict(f["options"]).get(value, "Усі") if value else "Усі"
@@ -150,6 +165,28 @@ class Catalog(Grid):
             content=ft.Container(ft.Row(plates, wrap=True, spacing=8, run_spacing=8),
                                  width=640)))
 
+    def pick_collection(self):
+        def choose(path):
+            self.app.page.pop_dialog()
+            self.path = path
+            self.chosen = {}
+            self.filters = []
+            self.render_filters()
+            self.reset()
+            self.next_page()
+            self.app.page.run_task(self.load_filters)
+
+        opts = [(self.root, "Усі")] + [(p, n) for n, p in COLLECTIONS[self.root]]
+        plates = [kit.plate(kit.label(label), on_click=lambda e, v=v: choose(v),
+                            kind="lit" if v == self.path else "plain", pad=(14, 10),
+                            autofocus=v == self.path)
+                  for v, label in opts]
+        self.app.page.show_dialog(ft.AlertDialog(
+            bgcolor=T.WALL, shape=ft.RoundedRectangleBorder(radius=4),
+            title=T.caps("Добірка", size=T.S_HEAD),
+            content=ft.Container(ft.Row(plates, wrap=True, spacing=8, run_spacing=8),
+                                 width=640)))
+
     def apply(self, chosen):
         self.chosen = chosen
         self.render_filters()
@@ -165,8 +202,59 @@ class Search(Grid):
             hint_text="Назва фільму чи серіалу", autofocus=True, text_size=T.S_BODY + 2,
             bgcolor=T.WALL_2, border_color=T.LINE, focused_border_color=T.SIGNAL,
             border_radius=3, cursor_color=T.SIGNAL, color=T.INK,
-            prefix_icon=ft.Icons.SEARCH_ROUNDED, on_submit=lambda e: self.run(e.control.value))
-        self.extra = [ft.Container(self.field, padding=ft.Padding.only(left=6, right=6))]
+            prefix_icon=ft.Icons.SEARCH_ROUNDED, on_submit=lambda e: self.run(e.control.value),
+            on_change=self.typed)
+        self.recent = ft.Row(wrap=True, spacing=8, run_spacing=8)
+        self.recent_box = ft.Container(
+            ft.Column([kit.kicker("Нещодавні пошуки"), self.recent], spacing=10, tight=True),
+            padding=ft.Padding.only(left=6, right=6, top=4))
+        self.extra = [ft.Container(self.field, padding=ft.Padding.only(left=6, right=6)),
+                      self.recent_box]
+        self.fill_recent()
+
+    # ── нещодавні пошуки: під полем, поки нічого не шукаємо (або що підходить до набраного)
+    def fill_recent(self, typed=""):
+        t = typed.strip().lower()
+        items = [q for q in self.app.store.searches if t in q.lower()] if t else \
+            list(self.app.store.searches)
+        chips = []
+        for q in items:
+            chips.append(ft.Row([
+                kit.plate(kit.label(q, ft.Icons.HISTORY_ROUNDED), pad=(14, 10),
+                          on_click=lambda e, q=q: self.pick(q)),
+                kit.plate(ft.Icon(ft.Icons.CLOSE_ROUNDED, size=16), pad=(10, 10),
+                          tooltip="Прибрати", on_click=lambda e, q=q: self.forget(q))],
+                spacing=2, tight=True))
+        if items and not t:
+            chips.append(kit.plate(kit.label("Очистити"), pad=(14, 10),
+                                   on_click=lambda e: self.forget(None)))
+        self.recent.controls = chips
+        self.recent_box.visible = bool(items) and not (self.query and self.grid.controls
+                                                         and t == self.query.lower())
+
+    def refresh_recent(self, typed=""):
+        self.fill_recent(typed)
+        try:
+            self.recent_box.update()
+        except Exception:
+            pass
+
+    def typed(self, e):
+        kit.quiet()
+        self.refresh_recent(e.control.value or "")
+
+    def pick(self, q):
+        self.field.value = q
+        try:
+            self.field.update()
+        except Exception:
+            pass
+        self.run(q)
+
+    def forget(self, q):
+        kit.quiet()
+        self.app.store.forget_search(q)
+        self.refresh_recent(self.field.value or "")
 
     def run(self, q):
         kit.quiet()
@@ -174,6 +262,12 @@ class Search(Grid):
         if not q:
             return
         self.query = q
+        self.app.store.remember_search(q)
+        self.recent_box.visible = False
+        try:
+            self.recent_box.update()
+        except Exception:
+            pass
         self.reset()
         self.next_page()
 

@@ -60,8 +60,12 @@ class Player:
         # якості потоку (1080 / 720 / 480) уже запитано у фоні (TitleScreen.play)
         url = core.quality_url(self.entry["url"], settings.get("quality") or "1080")
         base = 20 if app.mobile else 24 if app.tv else 28
+        try:
+            base = round(base * float(settings.get("sub_scale") or 1.0))
+        except (TypeError, ValueError):
+            pass
         self.video = fv.Video(
-            expand=True, autoplay=True, fill_color="#000000",
+            expand=True, autoplay=True, fill_color="#000000", fit=self.fit_mode(),
             title=self.title.item["title"],
             playlist=[fv.VideoMedia(url, http_headers=core.stream_headers(self.entry))],
             playlist_mode=fv.PlaylistMode.NONE,
@@ -144,6 +148,7 @@ class Player:
         self.view = self.app.push("/play", stack, bgcolor="#000000")
         self.view.on_close = self.close
         self.app.key_handler = self.on_key
+        self.app.player = self
         self.app.page.run_task(self.after_start)
         self.app.page.run_task(self.ticker)
         self.show_overlay(False)
@@ -152,6 +157,13 @@ class Player:
             self.mini_btn.visible = self.mini_drag.visible = True
             self.video.fit = ft.BoxFit.COVER
             self.top.visible = self.bottom.visible = False
+
+    def fit_mode(self):
+        """Масштаб кадру з налаштувань; «Авто» — на телефоні заповнити екран, деінде вписати."""
+        mode = self.app.store.settings.get("fit") or "auto"
+        if mode == "auto":
+            mode = "cover" if self.app.mobile else "contain"
+        return {"cover": ft.BoxFit.COVER, "fill": ft.BoxFit.FILL}.get(mode, ft.BoxFit.CONTAIN)
 
     # ── панель
     def show_overlay(self, focus=True):
@@ -381,6 +393,15 @@ class Player:
         except Exception:
             pass
 
+    async def pause(self):
+        """Пауза, якщо грає (застосунок пішов у фон)."""
+        try:
+            if await self.video.is_playing():
+                await self.video.pause()
+                self.set_play_icon(False)
+        except Exception:
+            pass
+
     async def seek_by(self, seconds):
         try:
             pos = (await self.video.get_current_position()).in_milliseconds
@@ -433,7 +454,7 @@ class Player:
             w.always_on_top = False
             w.title_bar_hidden = False
             w.title_bar_buttons_hidden = False
-            self.video.fit = ft.BoxFit.CONTAIN
+            self.video.fit = self.fit_mode()
             for k, v in sv.items():
                 if v is not None:
                     setattr(w, k, v)
@@ -490,6 +511,8 @@ class Player:
         """Вихід з плеєра: зберегти позицію й зупинити відео."""
         self.alive = False
         self.app.key_handler = None
+        if self.app.player is self:
+            self.app.player = None
         if not self.app.tv and not self.app.mobile and self.app.page.window.full_screen:
             self.fullscreen(False)
         if self.mini_on and not self.reopening:

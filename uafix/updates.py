@@ -77,6 +77,7 @@ class Updates:
                 self.app.toast("Не вдалося перевірити оновлення", error=True)
             return
         await store.prefs.set("update_checked_at", now)
+        self.app.notices.set_update(rel if updater.is_newer(rel["version"]) else None)
         if updater.is_newer(rel["version"]) and (
                 manual or rel["version"] != store.settings.get("skipped_version")):
             self.offer(rel)

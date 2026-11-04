@@ -13,6 +13,8 @@ BOOST = [("0", "Без підсилення"), ("6", "+6 дБ"), ("10", "+10 д�
 HWDEC = [("auto", "Апаратне"), ("copy", "Апаратне сумісне"), ("off", "Програмне")]
 PLAYER = [("ask", "Запитувати"), ("builtin", "Вбудований"), ("external", "Інша програма")]
 THEMES = [("dark", "Темна"), ("light", "Світла")]
+SUB_SIZES = [("0.75", "Малі"), ("1.0", "Середні"), ("1.3", "Великі"), ("1.6", "Дуже великі")]
+FIT = [("auto", "Авто"), ("contain", "Вписати"), ("cover", "Заповнити"), ("fill", "Розтягнути")]
 
 
 class Settings:
@@ -42,6 +44,11 @@ class Settings:
     def choice(self, title, key, options, hint=None, after=None):
         """Значення з переліку; натискання — наступне."""
         cur = str(self.app.store.settings.get(key))
+        if key == "sub_scale":  # 1.x зберігав число
+            try:
+                cur = str(float(cur))
+            except ValueError:
+                cur = "1.0"
         keys = [k for k, _ in options]
         name = dict(options).get(cur, options[0][1])
 
@@ -79,6 +86,9 @@ class Settings:
         rows += [self.section("Перегляд"),
                  self.choice("Якість відео", "quality", QUALITY),
                  self.toggle("Пропускати заставку UAFlix", "skip_intro"),
+                 self.choice("Розмір субтитрів", "sub_scale", SUB_SIZES),
+                 self.choice("Масштаб кадру", "fit", FIT,
+                             "«Авто»: на телефоні — на весь екран, деінде — вписати"),
                  self.choice("Гучність", "volume_boost", BOOST,
                              "Підсилення тихих фільмів"),
                  self.choice("Декодування відео", "hwdec", HWDEC,

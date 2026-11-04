@@ -23,6 +23,7 @@ NAV = [
     ("Аніме", "/anime/", ft.Icons.AUTO_AWESOME_ROUNDED),
     ("Обране", "favorites", ft.Icons.BOOKMARK_ROUNDED),
     ("Історія", "history", ft.Icons.HISTORY_ROUNDED),
+    ("Сповіщення", "notices", ft.Icons.NOTIFICATIONS_ROUNDED),
     ("Налаштування", "settings", ft.Icons.SETTINGS_ROUNDED),
     ("Відгук", "report", ft.Icons.BUG_REPORT_ROUNDED),
 ]
@@ -42,6 +43,7 @@ class App:
         T.configure(self.mobile)  # розміри шрифтів — під телефон / TV / ПК
         self.side = 18 if self.mobile else (32 if self.tv else 44)
         self.key_handler = None   # клавіші для поточного екрана (плеєр)
+        self.player = None        # відкритий плеєр (для паузи, коли застосунок іде у фон)
         self.back_at = 0.0
         self.section = "home"
         self.screens = {}
@@ -67,12 +69,15 @@ class App:
         page.on_view_pop = lambda e: self.back()
         page.on_route_change = lambda e: (kit.quiet(), self.handle_link(e.route))
         page.on_keyboard_event = self.on_key
+        page.on_app_lifecycle_state_change = self.on_lifecycle
         await self.store.load()
         core.ABROAD["enabled"] = bool(self.store.settings.get("abroad", True))
         core.ABROAD["get_proxy"] = self.tor_proxy
         page.run_task(self.store.sync_loop)
         from .updates import Updates
+        from .notices import Notices
         self.updates = Updates(self)
+        self.notices = Notices(self)
 
         from .home import Home
         from .catalog import Catalog, Search, Favorites, History
@@ -99,6 +104,7 @@ class App:
         page.update()  # без цього на телефоні до згортання/розгортання був сірий екран
         self.show("home")
         page.run_task(self.updates.on_start)
+        page.run_task(self.notices.loop)
         self.handle_link(page.route)  # застосунок відкрили посиланням uafix://open?url=…
 
     def tor_proxy(self):
@@ -116,6 +122,8 @@ class App:
         items = []
         for name, key, icon in NAV:
             lab = kit.label(name, icon, size=T.S_SMALL, left=True)
+            if key == "notices":  # дзвіночок з крапкою, коли є новини
+                lab.controls[0] = self.notices.bell_icon(T.S_SMALL + 6)
             if tv:
                 lab.controls[-1].visible = False  # згорнуте: лише іконка
                 self.rail_texts.append(lab.controls[-1])
@@ -231,6 +239,9 @@ class App:
     def show(self, key, name=None):
         """Розділ у правій частині (головна, пошук, каталог, обране)."""
         kit.quiet()
+        if key == "notices":  # не розділ — вікно поверх поточного
+            self.notices.open()
+            return
         if key == "report":  # не розділ — вікно поверх поточного
             from .report import open_report
             open_report(self)
@@ -302,6 +313,24 @@ class App:
         self.page.show_dialog(ft.SnackBar(
             ft.Text(message, color=T.LETTER, weight=ft.FontWeight.W_600),
             bgcolor=T.SIGNAL if error else T.BOARD, duration=ft.Duration(seconds=4)))
+
+    def on_lifecycle(self, e):
+        """Телефон: застосунок пішов у фон / закрили плаваюче вікно — пауза (у самому плаваючому
+        вікні застосунок лише «неактивний», і відео грає далі). ТВ: заставка чи кнопка «Додому»
+        — пауза, а коли повернулись — панель плеєра з фокусом на ▶."""
+        kit.quiet()
+        p = self.player
+        if p is None or not p.alive or not (self.mobile or self.tv):
+            return
+        if e.state in (ft.AppLifecycleState.HIDE, ft.AppLifecycleState.PAUSE):
+            p.suspended = True
+            self.page.run_task(p.pause)
+        elif e.state in (ft.AppLifecycleState.SHOW, ft.AppLifecycleState.RESUME) and self.tv \
+                and getattr(p, "suspended", False):
+            # лише після справжнього виходу у фон: індикатор гучності ТВ теж ненадовго
+            # «забирає» застосунок
+            p.suspended = False
+            p.show_overlay(True)
 
     async def on_key(self, e: ft.KeyboardEvent):
         kit.quiet()

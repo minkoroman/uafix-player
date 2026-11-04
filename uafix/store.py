@@ -17,6 +17,7 @@ DEFAULT_SETTINGS = {
     "quality": "1080", "keep_history": True, "card_meta": True, "abroad": True,
     "hwdec": "auto", "volume_boost": "6", "skip_intro": True, "sync_code": "",
     "history_cleared": 0, "player": "ask", "auto_updates": True, "skipped_version": "",
+    "sub_scale": 1.0, "fit": "auto",
 }
 
 ITEM_KEYS = ("url", "title", "orig", "poster", "age")
@@ -35,6 +36,7 @@ class Store:
         self.favorites = []      # новіше першим; прибране — з позначкою removed
         self.voice_titles = {}   # адреса тайтлу → обрана озвучка
         self.voice_recent = []   # студії, які обирали останніми
+        self.searches = []       # нещодавні пошуки (лише на цьому пристрої) — новіші першими
         self.listeners = []      # викликаються, коли змінилась історія чи обране
         self.sync_dirty = False  # є свої зміни, яких ще нема на сервері
         self.sync_busy = False
@@ -49,7 +51,7 @@ class Store:
             if value is not None:
                 self.settings[key] = value
         for key, attr in (("history", "history"), ("favorites", "favorites"),
-                          ("voice_recent", "voice_recent")):
+                          ("voice_recent", "voice_recent"), ("searches", "searches")):
             try:
                 raw = await self.prefs.get(key)
                 if raw:
@@ -69,6 +71,19 @@ class Store:
                 self.voice_titles.update(json.loads(raw))
         except Exception:
             pass
+
+    # ── нещодавні пошуки (той самий ключ, що й у 1.x)
+    SEARCHES_MAX = 10
+
+    def remember_search(self, q):
+        self.searches[:] = [q] + [x for x in self.searches if x.lower() != q.lower()][
+            :self.SEARCHES_MAX - 1]
+        self._save("searches", self.searches)
+
+    def forget_search(self, q=None):
+        """Прибрати один пошук або (q=None) усі."""
+        self.searches[:] = [x for x in self.searches if x != q] if q is not None else []
+        self._save("searches", self.searches)
 
     def _save(self, key, value):
         self.page.run_task(self.prefs.set, key, value if isinstance(value, str)

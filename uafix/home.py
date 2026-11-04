@@ -77,8 +77,11 @@ class Home:
         # телефон: назва й налаштування зверху (у нижньому меню — лише головні розділи)
         top = [ft.Container(ft.Row([
             T.caps("UAFix", size=22, weight=ft.FontWeight.W_900, spacing=0.06),
-            kit.plate(ft.Icon(ft.Icons.SETTINGS_ROUNDED, size=20),
-                      on_click=lambda e: app.show("settings", "Налаштування"), pad=(10, 10))],
+            ft.Row([kit.plate(app.notices.bell_icon(20), on_click=lambda e: app.notices.open(),
+                              pad=(10, 10)),
+                    kit.plate(ft.Icon(ft.Icons.SETTINGS_ROUNDED, size=20),
+                              on_click=lambda e: app.show("settings", "Налаштування"),
+                              pad=(10, 10))], spacing=6, tight=True)],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             padding=ft.Padding.only(left=app.side, right=app.side, top=14))] if app.mobile else []
         if app.tv:  # назва застосунку — у боковому меню; тут лише «стінка» на всю ширину:
@@ -223,6 +226,7 @@ class Home:
             except Exception:
                 break
             fresh += [it for it in items if it["url"] in favs and it not in fresh]
+        self.app.notices.set_fresh(fresh)
         if not fresh:
             return
         rows = [kit.board_row([(it["title"], 3, "main"), ("Нова серія", 1, "signal")],
