@@ -66,6 +66,9 @@ class Player:
             pass
         self.video = fv.Video(
             expand=True, autoplay=True, fill_color="#000000", fit=self.fit_mode(),
+            # свої вбудовані кнопки плеєра — геть: керування наше (панель), а невидимі вбудовані
+            # перехоплювали фокус пульта («вправо» з кнопок панелі губилось у них)
+            controls=None,
             title=self.title.item["title"],
             playlist=[fv.VideoMedia(url, http_headers=core.stream_headers(self.entry))],
             playlist_mode=fv.PlaylistMode.NONE,
@@ -141,6 +144,10 @@ class Player:
             on_tap=lambda e: (kit.quiet(), self.app.page.run_task(self.tap_center)),
             on_hover=lambda e: (kit.quiet(), self.show_overlay(False)), expand=True)
         self.top, self.bottom = top, bottom
+        self.panel_focus = False
+        if self.app.tv:
+            self._track_panel_focus(top)
+            self._track_panel_focus(bottom)
         # шари стопки — прив'язані до країв (без цього панель не мала розміру й не малювалась)
         self.overlay = ft.Container(ft.Column([top, middle, bottom], spacing=0),
                                     left=0, top=0, right=0, bottom=0)
@@ -249,7 +256,33 @@ class Player:
         if self.overlay.opacity != 0:
             self.overlay.opacity = 0
             self.top.visible = self.bottom.visible = False
+            self.panel_focus = False  # схована кнопка фокус уже не тримає
             self.overlay.update()
+
+    def _track_panel_focus(self, control):
+        """TV: чи стоїть фокус пульта на кнопці панелі (тоді стрілки ходять по кнопках,
+        інакше вліво / вправо — перемотка)."""
+        if isinstance(control, ft.Button):
+            old_focus, old_blur = control.on_focus, control.on_blur
+
+            def focus(e, f=old_focus):
+                self.panel_focus = True
+                if f:
+                    f(e)
+
+            def blur(e, b=old_blur):
+                self.panel_focus = False
+                if b:
+                    b(e)
+            control.on_focus, control.on_blur = focus, blur
+            return
+        for attr in ("content", "controls"):
+            child = getattr(control, attr, None)
+            if isinstance(child, list):
+                for c in child:
+                    self._track_panel_focus(c)
+            elif isinstance(child, ft.Control):
+                self._track_panel_focus(child)
 
     async def tap_center(self):
         if self.overlay.opacity != 1:
@@ -289,7 +322,8 @@ class Player:
                     self.time_text.update()
                     self.bar.update()
                 self.set_play_icon(playing)
-                if playing and time.monotonic() - self.shown_at > 4:
+                # пультом по кнопках панелі ходять довше — тоді й ховаємо пізніше
+                if playing and time.monotonic() - self.shown_at > (8 if self.panel_focus else 4):
                     self.hide_overlay()
             if dur and pos > 1000 and time.monotonic() - saved_at > 10:
                 saved_at = time.monotonic()
@@ -567,9 +601,9 @@ class Player:
         if key in ("Media Play", "Media Pause", "Media Play Pause"):
             await self.toggle()
             return True
-        if self.overlay.opacity == 1:
+        if self.overlay.opacity == 1 and (self.panel_focus or not self.app.tv):
             self.shown_at = time.monotonic()
-            return False  # панель видно — стрілки ходять по кнопках
+            return False  # фокус на кнопках панелі — стрілки ходять по них
         if key in ("Arrow Left", "Arrow Right"):
             await self.seek_by(-10 if key == "Arrow Left" else 10)
             return True
@@ -577,7 +611,9 @@ class Player:
             await self.toggle()
             return True
         if key in ("Arrow Up", "Arrow Down"):
-            self.show_overlay()
+            # панель з фокусом на ▶ — далі стрілками до субтитрів, масштабу, якості…
+            self.overlay.opacity = 0  # щоб show_overlay точно поставив фокус
+            self.show_overlay(True)
             return True
         return False
 
