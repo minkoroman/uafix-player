@@ -59,7 +59,7 @@ class Player:
             kw["hardware_decoding_api"] = "mediacodec-copy" if app.android else "auto-copy"
         # якості потоку (1080 / 720 / 480) уже запитано у фоні (TitleScreen.play)
         url = core.quality_url(self.entry["url"], settings.get("quality") or "1080")
-        base = 20 if app.mobile else 34 if app.tv else 28
+        base = 20 if app.mobile else 24 if app.tv else 28
         self.video = fv.Video(
             expand=True, autoplay=True, fill_color="#000000",
             title=self.title.item["title"],

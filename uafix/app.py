@@ -39,7 +39,7 @@ class App:
                        and not T.TV) or os.environ.get("UAFIX_MOBILE") == "1"
         self.android = page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.ANDROID_TV)
         T.configure(self.mobile)  # розміри шрифтів — під телефон / TV / ПК
-        self.side = 18 if self.mobile else 44
+        self.side = 18 if self.mobile else (32 if self.tv else 44)
         self.key_handler = None   # клавіші для поточного екрана (плеєр)
         self.back_at = 0.0
         self.section = "home"
@@ -105,19 +105,19 @@ class App:
         self.rail_items = {}
         items = []
         for name, key, icon in NAV:
-            btn = kit.plate(kit.label(name, icon, size=T.S_SMALL + (2 if self.tv else 0),
-                                      left=True),
+            btn = kit.plate(kit.label(name, icon, size=T.S_SMALL, left=True),
                             on_click=lambda e, k=key, n=name: self.show(k, n),
-                            pad=(16, 16 if self.tv else 12))
-            btn.width = (260 if self.tv else 236) - 36  # на всю ширину меню, напис — ліворуч
+                            pad=(14, 11 if self.tv else 12))
+            btn.width = (210 if self.tv else 236) - 32  # на всю ширину меню, напис — ліворуч
             self.rail_items[key] = btn
             items.append(ft.Container(btn, width=float("inf")))
-        mark = ft.Column([T.caps("UAFix", size=26, weight=ft.FontWeight.W_900, spacing=0.06),
+        mark = ft.Column([T.caps("UAFix", size=22 if self.tv else 26, weight=ft.FontWeight.W_900,
+                                 spacing=0.06),
                           kit.kicker("кінотеатр українською")], spacing=2, tight=True)
         return ft.Container(
             ft.Column([mark, ft.Container(height=22)] + items, spacing=6,
                       scroll=ft.ScrollMode.AUTO),
-            width=260 if self.tv else 236, padding=ft.Padding.only(left=20, right=16, top=30),
+            width=210 if self.tv else 236, padding=ft.Padding.only(left=16, right=16, top=26),
             bgcolor=T.WALL)
 
     def bottom_bar(self):

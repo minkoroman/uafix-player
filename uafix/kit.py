@@ -231,7 +231,7 @@ def board_row(cells, on_click=None, last=False, autofocus=False, height=None, tr
             t.update()
 
     btn = ft.Button(
-        content=ft.Container(body, height=None if T.MOBILE else (height or (72 if T.TV else 56)),
+        content=ft.Container(body, height=None if T.MOBILE else (height or (56 if T.TV else 56)),
                              padding=ft.Padding.symmetric(vertical=12) if T.MOBILE else None,
                              alignment=ft.Alignment.CENTER_LEFT),
         on_click=_click(on_click), autofocus=autofocus, expand=True,

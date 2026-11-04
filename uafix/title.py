@@ -318,7 +318,7 @@ class TitleScreen:
             rows.append(kit.board_row(
                 [(ep["label"], 3, "main"), (state, 2 if not self.app.mobile else 1, kind)],
                 on_click=lambda e, ei=ei: self.app.page.run_task(self.play, si, ei, None),
-                last=ei == len(eps) - 1, height=64 if self.app.tv else 52))
+                last=ei == len(eps) - 1, height=52))
         if not eps and self.seasons and self.seasons[si].get("locked"):
             rows = [ft.Container(T.text("Сайт показує цей сезон лише зареєстрованим",
                                         color=T.LETTER), padding=20)]
@@ -461,7 +461,7 @@ class TitleScreen:
             cells = [(f"{i + 1}.  {name}", 5, "main"), (p["year"], 1, "dim"), (note, 2, kind)]
             go = (lambda e, it=site: self.app.open_title(it)) if site and not here else None
             rows.append(kit.board_row(cells, on_click=go, last=i == len(saga["parts"]) - 1,
-                                      height=60 if self.app.tv else 50))
+                                      height=50))
         name = saga["name"]
         self.saga_box.controls = [kit.board(rows, f"Франшиза{' · ' + name if name else ''}"
                                                   " · по порядку перегляду")]
@@ -479,7 +479,7 @@ class TitleScreen:
             return
         if not people:
             return
-        size = 96 if self.app.tv else 76 if not self.app.mobile else 64
+        size = 64 if self.app.tv else 76 if not self.app.mobile else 64
 
         def person(c):
             face = ft.Container(

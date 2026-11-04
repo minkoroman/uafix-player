@@ -35,7 +35,7 @@ def ep_text(h):
 class Home:
     def __init__(self, app):
         self.app = app
-        self.card_w = 200 if app.mobile else (300 if app.tv else 250)
+        self.card_w = 200 if app.mobile else (220 if app.tv else 250)
         self.board_box = ft.Column(spacing=0)
         self.board_section = ft.Container(
             self.board_box, padding=ft.Padding.only(left=app.side, right=app.side, top=28),

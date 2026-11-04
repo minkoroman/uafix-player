@@ -12,7 +12,7 @@ class Grid:
 
     def __init__(self, app, title):
         self.app = app
-        self.card_w = 168 if app.mobile else (300 if app.tv else 250)
+        self.card_w = 168 if app.mobile else (220 if app.tv else 250)
         self.title = T.caps(title, size=T.S_HEAD + 8 if not app.mobile else T.S_HEAD + 4)
         self.status = T.text("", size=T.S_SMALL, color=T.DIM)
         self.grid = ft.Row(wrap=True, spacing=4, run_spacing=10)
