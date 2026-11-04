@@ -236,6 +236,8 @@ class Home:
 
     def focused(self, key, control):
         self.last_focus = control
+        if key is None or key == f"shelf-{SHELVES[0][1]}":
+            self._row_key = "-"  # верх головної — завжди докрутити до заголовка
         self.reveal_row(key)
 
     def reveal_row(self, key):
