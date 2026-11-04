@@ -8,6 +8,7 @@ import flet as ft
 import core
 import updater
 from . import kit, theme as T
+from .links import CTRL
 
 CHECK_EVERY = 6 * 3600  # автоматично — не частіше ніж раз на 6 годин
 
@@ -177,7 +178,7 @@ class Updates:
 
     @staticmethod
     async def launch_installer():
-        await ft.UrlLauncher().launch_url("uafixupdate://install",
+        await ft.UrlLauncher().launch_url(f"{CTRL}://install",
                                           mode=ft.LaunchMode.EXTERNAL_APPLICATION)
 
     async def install_desktop(self, path, url):
@@ -201,7 +202,7 @@ class Updates:
     async def restart(self):
         """Перезапуск (зміна теми): Android — MainActivity, ПК — скрипт перезапуску."""
         if self.platform == "android":
-            await ft.UrlLauncher().launch_url("uafixupdate://restart",
+            await ft.UrlLauncher().launch_url(f"{CTRL}://restart",
                                               mode=ft.LaunchMode.EXTERNAL_APPLICATION)
             return
         if self.platform in ("macos", "windows") and updater.desktop_target(self.platform):

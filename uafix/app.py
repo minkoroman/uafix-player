@@ -10,6 +10,7 @@ import tor_runner
 from urllib.parse import urlencode
 
 from . import kit, theme as T
+from .links import CTRL
 from .store import Store
 
 # розділи меню: (назва, ключ / шлях розділу сайту, іконка)
@@ -95,7 +96,7 @@ class App:
     def tor_proxy(self):
         def android_launch(exits):
             self.page.run_task(ft.UrlLauncher().launch_url,
-                               "uafixupdate://tor?" + urlencode({"exits": ",".join(exits[:40])}),
+                               f"{CTRL}://tor?" + urlencode({"exits": ",".join(exits[:40])}),
                                mode=ft.LaunchMode.EXTERNAL_APPLICATION)
         return tor_runner.proxy(android_launch if self.android else None)
 

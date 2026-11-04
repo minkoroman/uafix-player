@@ -6,6 +6,7 @@ import flet as ft
 import core
 import tmdb
 from . import kit, theme as T
+from .links import CTRL
 from .store import item_of
 
 
@@ -402,7 +403,7 @@ class TitleScreen:
         name = (self.info.get("title") or self.item["title"]) + \
             (f" · {ep['label']}" if len(self.all_episodes()) > 1 else "")
         await ft.UrlLauncher().launch_url(
-            "uafixupdate://external?" + urlencode({"url": url, "title": name}),
+            f"{CTRL}://external?" + urlencode({"url": url, "title": name}),
             mode=ft.LaunchMode.EXTERNAL_APPLICATION)
 
     def pick_source(self, ep):

@@ -7,6 +7,7 @@ import flet_video as fv
 
 import core
 from . import kit, theme as T
+from .links import CTRL
 from .title import fmt_time
 
 # запас для нестабільного відеосервера: без нього плеєр підвисав і розсинхронювався
@@ -447,7 +448,7 @@ class Player:
             return
         self.pip_on = playing
         self.app.page.run_task(ft.UrlLauncher().launch_url,
-                               f"uafixupdate://pip?on={1 if playing else 0}",
+                               f"{CTRL}://pip?on={1 if playing else 0}",
                                mode=ft.LaunchMode.EXTERNAL_APPLICATION)
 
     def fullscreen(self, on=None):
