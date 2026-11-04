@@ -358,7 +358,7 @@ def main(out_dir: str) -> None:
         sys.exit("styles.xml не знайдено — шаблон змінився")
     for f in styles:
         text = f.read_text(encoding="utf-8")
-        f.write_text(text.replace("?android:colorBackground", "#FF0D0E12"), encoding="utf-8")
+        f.write_text(text.replace("?android:colorBackground", "#FF13100E"), encoding="utf-8")
     shutil.copy(BANNER, manifests[0].parent / "res" / "drawable-xhdpi" / "tv_banner.png")
     copy_icon_resources(manifests[0].parent / "res")
     manifests[0].write_text(manifest, encoding="utf-8")

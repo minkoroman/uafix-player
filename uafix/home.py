@@ -1,5 +1,7 @@
 """Головна: табло «Сьогодні в залі» (продовжити перегляд) і ряди афіш."""
 import asyncio
+import json
+import os
 
 import flet as ft
 
@@ -36,6 +38,30 @@ def ep_text(h, short=False):
     return text
 
 
+HOME_CACHE = {}  # розділ → картки з минулого запуску (показати одразу, поки вантажиться свіже)
+
+
+def _cache_path():
+    base = os.environ.get("FLET_APP_STORAGE_DATA") or os.path.expanduser("~")
+    return os.path.join(base, ".uafix2_home.json")
+
+
+def load_home_cache():
+    try:
+        with open(_cache_path(), encoding="utf-8") as f:
+            HOME_CACHE.update(json.load(f))
+    except Exception:
+        pass
+
+
+def save_home_cache():
+    try:
+        with open(_cache_path(), "w", encoding="utf-8") as f:
+            json.dump(HOME_CACHE, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
 class Home:
     def __init__(self, app):
         self.app = app
@@ -46,6 +72,7 @@ class Home:
             visible=False)
         self.fav_new = ft.Container(padding=ft.Padding.only(left=app.side, right=app.side, top=24),
                                     visible=False)
+        load_home_cache()
         self.shelves = [self.shelf(*s) for s in SHELVES]
         # телефон: назва й налаштування зверху (у нижньому меню — лише головні розділи)
         top = [ft.Container(ft.Row([
@@ -54,6 +81,12 @@ class Home:
                       on_click=lambda e: app.show("settings", "Налаштування"), pad=(10, 10))],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             padding=ft.Padding.only(left=app.side, right=app.side, top=14))] if app.mobile else []
+        if app.tv:  # меню згорнуте до іконок — назва застосунку вгорі головної
+            top = [ft.Container(ft.Row([
+                T.caps("UAFix", size=26, weight=ft.FontWeight.W_900, spacing=0.06),
+                kit.kicker("кінотеатр українською")], spacing=14,
+                vertical_alignment=ft.CrossAxisAlignment.END),
+                padding=ft.Padding.only(left=app.side, right=app.side, top=22))]
         self.list = ft.ListView(
             top + [self.board_section, self.fav_new] + [col for col, _ in self.shelves] + [ft.Container(height=40)],
             expand=True, spacing=0)
@@ -125,14 +158,15 @@ class Home:
                             padding=ft.Padding.only(left=self.app.side, right=self.app.side,
                                                     top=34, bottom=6))
 
-        async def load():
-            try:
-                items = await asyncio.to_thread(core.fresh_catalog, path, block)
-            except Exception:
-                items = []
+        def fill(items):
             items = items[:14] if self.app.tv else items[:24]
+            # TV: фокус на афіші — показати весь ряд разом із заголовком (інакше список
+            # прокручувався рівно до картки, і підпис ряду ховався вгорі)
+            reveal = (lambda f, k=f"shelf-{path}": self.reveal_row(k) if f else None) \
+                if self.app.tv else None
             cards = [kit.poster_card(self.app.page, it, self.app.open_title, w,
-                                     meta=self.app.store.settings.get("card_meta", True))
+                                     meta=self.app.store.settings.get("card_meta", True),
+                                     on_focus=reveal)
                      for it in items]
             if self.app.tv and cards:  # замість «Усі» в заголовку — остання плашка в ряду
                 cards.append(ft.Container(kit.plate(
@@ -146,7 +180,24 @@ class Home:
             except Exception:
                 pass
 
-        return ft.Column([head, row], spacing=0), load
+        async def load():
+            # спершу — ряд з минулого запуску (миттєво), потім свіже з сайту, якщо змінилось
+            cached = HOME_CACHE.get(path) or []
+            if cached:
+                fill(cached)
+            try:
+                items = await asyncio.to_thread(core.fresh_catalog, path, block)
+            except Exception:
+                items = []
+            if items and [i["url"] for i in items[:24]] != [i["url"] for i in cached[:24]]:
+                fill(items)
+                HOME_CACHE[path] = items[:24]
+                save_home_cache()
+            elif not items and not cached:
+                fill([])
+
+        col = ft.Column([head, row], spacing=0, key=f"shelf-{path}")
+        return col, load
 
     async def check_fav_new(self):
         """Серіали з «Обраного», у яких щойно вийшла нова серія (розділ сайту «Нові серії»)."""
@@ -173,3 +224,9 @@ class Home:
             self.fav_new.update()
         except Exception:
             pass
+
+    def reveal_row(self, key):
+        if getattr(self, "_row_key", None) == key:
+            return  # уже показано (рух уздовж ряду)
+        self._row_key = key
+        self.app.page.run_task(self.list.scroll_to, scroll_key=key, duration=180)

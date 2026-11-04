@@ -156,7 +156,7 @@ def tmdb_poster(page, item, width, on_meta=None, meta=True):
     return box
 
 
-def poster_card(page, item, on_open, width, meta=True, autofocus=False):
+def poster_card(page, item, on_open, width, meta=True, autofocus=False, on_focus=None):
     """Афіша: вертикальний постер TMDB, під ним назва й «★ 7.6 · Драма». Вибрана — у рамці."""
     title = ft.Text(item.get("title") or "", size=T.S_SMALL + 1, weight=ft.FontWeight.W_700,
                     color=T.INK, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
@@ -184,6 +184,8 @@ def poster_card(page, item, on_open, width, meta=True, autofocus=False):
                      spacing=0, width=width, tight=True)
     return ft.Button(
         content=body, on_click=_click(lambda e: on_open(item)), autofocus=autofocus,
+        on_focus=(lambda e: (quiet(), on_focus(True))) if on_focus else None,
+        on_blur=(lambda e: (quiet(), on_focus(False))) if on_focus else None,
         style=ft.ButtonStyle(
             bgcolor=ft.Colors.TRANSPARENT, elevation=0, padding=5,
             overlay_color=ft.Colors.TRANSPARENT, shadow_color=ft.Colors.TRANSPARENT,

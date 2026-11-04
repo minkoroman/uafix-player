@@ -142,6 +142,13 @@ class App:
                 b.width = RAIL_TV_MIN - 16
         return self.rail_box
 
+    async def keep_focus(self, control):
+        await asyncio.sleep(0.05)
+        try:
+            await control.focus()
+        except Exception:
+            pass
+
     def rail_focused(self, key, on):
         """TV: фокус зайшов у меню — розгорнути (підписи, назва); вийшов — згорнути."""
         if on:
@@ -275,6 +282,13 @@ class App:
 
     async def on_key(self, e: ft.KeyboardEvent):
         kit.quiet()
+        if self.tv and self.rail_focus and e.key in ("Arrow Up", "Arrow Down"):
+            # краї меню: Flutter шукає «найближче» вище / нижче й перескакував праворуч у вміст
+            keys = list(self.rail_items)
+            edge = keys[0] if e.key == "Arrow Up" else keys[-1]
+            if edge in self.rail_focus:
+                self.page.run_task(self.keep_focus, self.rail_items[edge])
+                return
         if e.key in BACK_KEYS:
             # затиснута клавіша (чи повтор пульта) шле «Назад» сотнями — один раз на 0,4 с
             now = time.monotonic()
