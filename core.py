@@ -228,7 +228,7 @@ def parse_catalog(html, base=BASE):
 
 def parse_title(html, url=BASE):
     """Інформація зі сторінки тайтлу: постер, рік, жанри, IMDb, опис…"""
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(_title_part(html), "html.parser")
     info = {"title": "", "orig": "", "poster": "", "year": "", "genres": [], "country": "",
             "imdb": "", "age": "", "duration": "", "description": "", "actors": [], "trailer": ""}
     el = soup.select_one("#ftitle [itemprop=name]") or soup.select_one("h1")
@@ -421,11 +421,79 @@ FILE_RE = re.compile(r'''\bfile\s*:\s*(['"])(.*?)(?<!\\)\1''', re.S)
 EPISODE_LINK_RE = re.compile(r'(season|sezon|episode|seriya|seria|seriia|epizod)[-_]?\d+', re.I)
 
 
-def find_iframes(html, base):
-    soup = BeautifulSoup(html, "html.parser")
+
+# ───────── швидкий розбір без BeautifulSoup ─────────
+# Сторінки сайту ~300 КБ; повний розбір html.parser на ТВ (armv7) — секунди. Там, де потрібні
+# лише посилання, iframe чи назви вкладок, вистачає регулярних виразів.
+import html as _html
+
+# скрипти, стилі, коментарі й <meta> (у content буває текст «<iframe …>» — це не плеєр)
+_SCRIPT_RE = re.compile(r"""<(script|style)\b.*?</\1\s*>|<!--.*?-->|<meta\b(?:[^>"']|"[^"]*"|'[^']*')*>""",
+                        re.S | re.I)
+_A_RE = re.compile(r"<a\b([^>]*)>(.*?)</a\s*>", re.S | re.I)
+_IFRAME_RE = re.compile(r"<iframe\b([^>]*)>", re.I)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+_CODE_RE = re.compile(r"<(script|style)\b.*?</\1\s*>|<!--.*?-->", re.S | re.I)
+
+
+def _markup(html):
+    return _SCRIPT_RE.sub(" ", html)
+
+
+def _title_part(html):
+    """Для parse_title — лише шапка тайтлу (до форми коментарів) і самі відгуки, без
+    скриптів: BeautifulSoup на ТВ розбирає це в рази швидше."""
+    html = _CODE_RE.sub(" ", html)
+    # між ними — форма коментаря з набором смайлів (~250 КБ, тисячі елементів)
+    head_end = html.find("dle-comments-form")
+    m = re.search(r"""id=["']comment-id-""", html)
+    first = m.start() if m else -1
+    if head_end < 0 or 0 <= first < head_end:
+        return html
+    head = html[:html.rfind("<", 0, head_end)]
+    if first < 0:
+        return head  # відгуків немає
+    start = html.rfind("<", 0, first)
+    end = html.find("<footer", first)
+    return head + html[start:end if end > 0 else len(html)]
+
+
+def _attr(attrs, name):
+    m = re.search(r"(?:^|\s)" + re.escape(name) + r"""\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""",
+                  attrs, re.I)
+    if not m:
+        return None
+    return _html.unescape(next(g for g in m.groups() if g is not None))
+
+
+def _text(fragment):
+    return " ".join(_html.unescape(_TAG_RE.sub(" ", fragment)).split())
+
+
+def _links(html):
+    """[(href, текст)] усіх <a href> сторінки."""
     out = []
-    for fr in soup.find_all("iframe"):
-        src = fr.get("src") or fr.get("data-src") or fr.get("data-lazy-src")
+    for m in _A_RE.finditer(_markup(html)):
+        href = _attr(m.group(1), "href")
+        if href is not None:
+            out.append((href, _text(m.group(2))))
+    return out
+
+
+def _class_texts(html, cls):
+    """Тексти елементів із класом cls (як .select(f".{cls}") + get_text)."""
+    rx = re.compile(r"""<(\w+)\b[^>]*\bclass\s*=\s*["'][^"']*(?<![\w-])""" + re.escape(cls)
+                    + r"""(?![\w-])[^"']*["'][^>]*>(.*?)</\1\s*>""", re.S | re.I)
+    return [_text(m.group(2)) for m in rx.finditer(_markup(html))]
+
+
+def find_iframes(html, base):
+    out = []
+    for m in _IFRAME_RE.finditer(_markup(html)):
+        a = m.group(1)
+        src = _attr(a, "src") or _attr(a, "data-src") or _attr(a, "data-lazy-src")
         if src and not src.startswith(("about:", "javascript:")):
             out.append(urljoin(base, src))
     for m in re.finditer(r'''["'](//[^"']+/(?:embed|vod|serial|video)/[^"']+)["']''', html):
@@ -636,7 +704,7 @@ def cdn_ok(url, referer):
 def _page_streams(url, label=(), html=None):
     html = html if html is not None else fetch(url)
     # вкладки плеєрів на сторінці («Плеєр 1», «Плеєр 2 (субтитри)») — у тому ж порядку, що й iframe
-    tabs = [t.get_text(" ", strip=True) for t in BeautifulSoup(html, "html.parser").select(".tabs-link")]
+    tabs = _class_texts(html, "tabs-link")
     found = []
     for i, fr in enumerate(find_iframes(html, url)):
         try:
@@ -907,9 +975,8 @@ def list_episodes(url, html, workers=4):
     seasons = set()
 
     def collect(page_html, page_url):
-        soup = BeautifulSoup(page_html, "html.parser")
-        for a in soup.find_all("a", href=True):
-            u = urljoin(page_url, a["href"]).split("#")[0].split("?")[0]
+        for href, text in _links(page_html):
+            u = urljoin(page_url, href).split("#")[0].split("?")[0]
             path = urlparse(u).path
             if not path.startswith(base_path + "/"):
                 continue
@@ -919,7 +986,6 @@ def list_episodes(url, html, workers=4):
             m = EP_PATH_RE.search(path)
             if not m:
                 continue
-            text = a.get_text(" ", strip=True)
             t = re.match(r"^\s*сезон\s*\d+\s*сері[яї]\s*\d+\s*(.*)$", text, re.I)
             name = t.group(1).strip() if t else ""
             item = episodes.setdefault(u, {"season": int(m.group(1)), "num": int(m.group(2)),

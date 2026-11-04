@@ -93,9 +93,17 @@ class TitleScreen:
         self.view.on_return = self.on_return
         page = app.page
 
-        # ── опис зі сторінки сайту
+        kit.hold_background(True)  # постери головної чекають, поки шукаємо відео
+        try:
+            await self.load(page, autoplay)
+        finally:
+            kit.hold_background(False)
+
+    async def load(self, page, autoplay):
+        # ── опис зі сторінки сайту; потоки шукаємо одразу ж, паралельно з розбором опису
         try:
             html = await kit.run_fast(core.fetch, self.item["url"])
+            streams = asyncio.ensure_future(kit.run_fast(core.page_streams, self.item["url"], html))
             info = await kit.run_fast(core.parse_title, html, self.item["url"])
         except Exception as ex:
             self.status.controls = [T.text(core.friendly_error(ex, "сторінку"), color=T.SIGNAL)]
@@ -108,7 +116,7 @@ class TitleScreen:
 
         # ── серії: плеєри на сторінці (фільм / серіал з плейлистом) або окремі сторінки серій
         try:
-            found = await kit.run_fast(core.page_streams, self.item["url"], html)
+            found = await streams
             if found:
                 self.seasons = core.group_streams(found)
             else:

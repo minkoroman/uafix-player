@@ -81,19 +81,14 @@ class Home:
                       on_click=lambda e: app.show("settings", "Налаштування"), pad=(10, 10))],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             padding=ft.Padding.only(left=app.side, right=app.side, top=14))] if app.mobile else []
-        if app.tv:  # меню згорнуте до іконок — назва застосунку вгорі головної
-            top = [ft.Container(ft.Row([
-                T.caps("UAFix", size=26, weight=ft.FontWeight.W_900, spacing=0.06),
-                kit.kicker("кінотеатр українською")], spacing=14,
-                vertical_alignment=ft.CrossAxisAlignment.END),
-                padding=ft.Padding.only(left=app.side, right=app.side, top=22)),
-                # «стінка» на всю ширину: зайве «вгору» з першого ряду лишає фокус на місці,
-                # а не виводить його в ліве меню
-                app.focus_wall(lambda: self.last_focus, width=4000)]
+        if app.tv:  # назва застосунку — у боковому меню; тут лише «стінка» на всю ширину:
+            # зайве «вгору» з першого ряду лишає фокус на місці, а не виводить його в меню
+            top = [app.focus_wall(lambda: self.last_focus, width=4000)]
         self.last_focus = None
         self.list = ft.ListView(
-            top + [self.board_section, self.fav_new] + [col for col, _ in self.shelves] + [ft.Container(height=40)],
-            expand=True, spacing=0)
+            top + [self.board_section, self.fav_new] + [col for col, _ in self.shelves] +
+            [ft.Container(height=400 if app.tv else 40)],  # TV: щоб і нижні ряди ставали вгору
+            expand=True, spacing=0, build_controls_on_demand=not app.tv)
         self.loaded = False
         self.continue_urls = None
         app.store.listeners.append(self.refresh_board)
@@ -210,7 +205,7 @@ class Home:
             elif not items and not cached:
                 fill([])
 
-        col = ft.Column([head, row], spacing=0, key=f"shelf-{path}")
+        col = ft.Column([head, row], spacing=0, key=ft.ScrollKey(f"shelf-{path}"))
         return col, load
 
     async def check_fav_new(self):
@@ -259,6 +254,6 @@ class Home:
             if key is None or (key == first and not self.board_section.visible):
                 await self.list.scroll_to(offset=0, duration=160)
             else:
-                await self.list.scroll_to(scroll_key=key, duration=160)
+                await self.list.scroll_to(scroll_key=ft.ScrollKey(key), duration=160)
         except Exception:
             pass

@@ -100,6 +100,19 @@ async def run_fast(fn, *args):
 
 
 _slots = None
+_idle = None  # asyncio.Event: встановлена — фонові пошуки постерів можуть іти
+
+
+def hold_background(on):
+    """Притримати пошук постерів і рейтингів карток (на ТВ процесор слабкий: поки відкривається
+    фільм, усе для нього)."""
+    global _idle
+    if _idle is None:
+        _idle = asyncio.Event()
+        _idle.set()
+    _idle.clear() if on else _idle.set()
+
+
 POSTER = "w342"
 RATIO = 2 / 3  # вертикальний постер
 
@@ -147,6 +160,8 @@ def tmdb_poster(page, item, width, on_meta=None, meta=True):
         import core
         try:
             async with _slots:
+                if _idle is not None:
+                    await _idle.wait()
                 if not known:
                     url = await asyncio.wait_for(asyncio.to_thread(
                         tmdb.poster, item["url"], item.get("title", ""), item.get("orig", ""),
@@ -157,6 +172,8 @@ def tmdb_poster(page, item, width, on_meta=None, meta=True):
                     except Exception:
                         return
                 if on_meta and meta:  # рейтинг і жанри — з того ж пошуку (назви жанрів раз)
+                    if _idle is not None:
+                        await _idle.wait()
                     m = await asyncio.wait_for(asyncio.to_thread(
                         tmdb.meta, item["url"], item.get("title", ""), item.get("orig", ""),
                         item.get("year", ""), core.site_meta), 15)
