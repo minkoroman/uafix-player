@@ -23,7 +23,7 @@ NAV = [
     ("Обране", "favorites", ft.Icons.BOOKMARK_ROUNDED),
     ("Історія", "history", ft.Icons.HISTORY_ROUNDED),
     ("Налаштування", "settings", ft.Icons.SETTINGS_ROUNDED),
-    ("Повідомити про проблему", "report", ft.Icons.BUG_REPORT_ROUNDED),
+    ("Написати автору", "report", ft.Icons.BUG_REPORT_ROUNDED),
 ]
 MOBILE_NAV = ("home", "search", "/films/", "/serials/", "favorites")
 BACK_KEYS = ("Escape", "Go Back", "Browser Back")
@@ -110,7 +110,7 @@ class App:
         return ft.Container(
             ft.Column([mark, ft.Container(height=22)] + items, spacing=6,
                       scroll=ft.ScrollMode.AUTO),
-            width=250 if self.tv else 220, padding=ft.Padding.only(left=20, right=16, top=30),
+            width=260 if self.tv else 236, padding=ft.Padding.only(left=20, right=16, top=30),
             bgcolor=T.WALL)
 
     def bottom_bar(self):

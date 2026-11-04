@@ -140,8 +140,8 @@ class Catalog(Grid):
         self.app.page.show_dialog(ft.AlertDialog(
             bgcolor=T.WALL, shape=ft.RoundedRectangleBorder(radius=4),
             title=T.caps(f["title"], size=T.S_HEAD),
-            content=ft.Container(ft.Row(plates, wrap=True, spacing=8, run_spacing=8,
-                                        scroll=ft.ScrollMode.AUTO), width=640)))
+            content=ft.Container(ft.Row(plates, wrap=True, spacing=8, run_spacing=8),
+                                 width=640)))
 
     def apply(self, chosen):
         self.chosen = chosen
