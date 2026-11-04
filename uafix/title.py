@@ -30,8 +30,10 @@ class TitleScreen:
     async def open(self, autoplay=False):
         app = self.app
         hero_h = 230 if app.mobile else (470 if app.tv else 420)
-        self.backdrop = ft.Container(kit.cover(self.item.get("poster")), left=0, top=0, right=0,
-                                     bottom=0, bgcolor=T.WALL_2)
+        # кадр — лише з TMDB (картинки сайту не вантажимо); знайдений раніше — одразу
+        known, still = tmdb.cached(self.item["url"], "w1280")
+        self.backdrop = ft.Container(kit.cover(still), left=0, top=0, right=0,
+                                     bottom=0, bgcolor=T.WALL)
         shade = ft.Container(left=0, top=0, right=0, bottom=0, gradient=ft.LinearGradient(
             begin=ft.Alignment.TOP_CENTER, end=ft.Alignment.BOTTOM_CENTER,
             colors=[ft.Colors.with_opacity(0.0, T.FACADE), ft.Colors.with_opacity(0.35, T.FACADE),
@@ -148,10 +150,12 @@ class TitleScreen:
         self.update()
 
     async def load_backdrop(self):
-        """Широкий кадр з TMDB (якщо є) замість картинки сайту."""
+        """Широкий кадр з TMDB: пошук з роком сайту (знайдене для картки без року —
+        перевіряється й за потреби шукається заново)."""
         try:
-            url = await asyncio.to_thread(tmdb.backdrop, self.item["url"], self.item["title"],
-                                          self.item.get("orig", ""), self.info.get("year", ""))
+            url = await asyncio.to_thread(
+                tmdb.backdrop, self.item["url"], self.info.get("title") or self.item["title"],
+                self.info.get("orig") or self.item.get("orig", ""), self.info.get("year", ""))
         except Exception:
             url = None
         if url:

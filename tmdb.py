@@ -26,11 +26,12 @@ API = "https://api.themoviedb.org/3"
 IMG = "https://image.tmdb.org/t/p/"
 _session = requests.Session()
 _lock = threading.Lock()
-CACHE_V = 2  # версія кешу: 2 — пошук спершу за оригінальною назвою, з перевіркою року
+CACHE_V = 3  # версія кешу: 3 — спершу українська назва, потім оригінальна; рік знайденого
 _cache = None  # url сторінки на сайті → шлях кадру в TMDB ("" — не знайдено)
 _ids = {}  # url сторінки → (kind, id) у TMDB (у тому ж файлі під ключем "__ids__")
 _meta = {}  # url сторінки → {"r": рейтинг або None, "g": [id жанрів]} ("__meta__")
 _genres = {}  # id жанру → назва українською ("__genres__")
+_years = {}  # url сторінки → рік знайденого в TMDB ("__years__"): звірити з роком сайту
 
 
 def enabled():
@@ -55,6 +56,7 @@ def _load():
         _ids.update({k: tuple(v) for k, v in _cache.pop("__ids__", {}).items()})
         _meta.update(_cache.pop("__meta__", {}))
         _genres.update({int(k): v for k, v in _cache.pop("__genres__", {}).items()})
+        _years.update(_cache.pop("__years__", {}))
     return _cache
 
 
@@ -62,7 +64,7 @@ def _save():
     try:
         with open(_cache_file(), "w", encoding="utf-8") as f:
             json.dump(dict(_cache, __ids__=_ids, __meta__=_meta, __genres__=_genres,
-                           __v__=CACHE_V), f, ensure_ascii=False)
+                           __years__=_years, __v__=CACHE_V), f, ensure_ascii=False)
     except Exception:
         pass
 
@@ -98,15 +100,21 @@ def _search(kind, query, year):
         same = [r for r in res
                 if q in (_norm(r.get("title") or r.get("name")),
                          _norm(r.get("original_title") or r.get("original_name")))]
+        if not year and len(same) > 1:
+            # рік невідомий (картка каталогу) — на сайті здебільшого свіже: найновіший
+            same.sort(key=lambda r: r.get("release_date") or r.get("first_air_date") or "",
+                      reverse=True)
         return (same or res)[0]
     return None
 
 
 def _queries(title, orig):
-    """Спершу оригінальна (латиницею) назва — вона однозначніша: українських «Бур» кілька."""
-    if orig and re.search(r"[A-Za-z]", orig):
-        return [q for q in (orig, title) if q]
-    return [q for q in (title, orig) if q]
+    """Спершу українська назва; не знайшлось — оригінальна (з тим самим роком)."""
+    return list(dict.fromkeys(q for q in (title, orig) if q))
+
+
+def _hit_year(hit):
+    return (hit.get("release_date") or hit.get("first_air_date") or "")[:4]
 
 
 def _best_backdrop(kind, tmdb_id, fallback):
@@ -138,24 +146,33 @@ def backdrop(url, title, orig="", year="", size="w1280"):
     викликати з потоку."""
     if not TMDB_TOKEN or not title:
         return None
+    year = str(year or "")[:4]
     with _lock:
         cache = _load()
-        if url in cache:
+        known = _years.get(url, "")
+        # знайдене без року (з картки) не збігається з роком сайту — шукаємо знову з роком
+        stale = bool(year and known and year.isdigit() and known.isdigit()
+                     and abs(int(year) - int(known)) > 1)
+        if url in cache and not stale:
             path = cache[url]
             return IMG + size + path if path else None
+        if stale:
+            _ids.pop(url, None)
+            _meta.pop(url, None)
     kinds = ("movie", "tv") if "/films/" in url else ("tv", "movie")
     path = ""
     try:
         for kind in kinds:
             hit = None
             for q in _queries(title, orig):
-                hit = _search(kind, q, str(year or "")[:4])
+                hit = _search(kind, q, year)
                 if hit:
                     break
             if hit:
                 path = _best_backdrop(kind, hit["id"], hit.get("backdrop_path"))
                 _ids[url] = (kind, hit["id"])
                 _meta[url] = _meta_of(hit)
+                _years[url] = _hit_year(hit)
                 break
     except Exception:
         return None  # мережа/ліміт — не запам'ятовуємо, спробуємо наступного разу

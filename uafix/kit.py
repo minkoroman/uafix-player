@@ -77,62 +77,87 @@ def kicker(text, color=None):
                   spacing=0.14)
 
 
-def image(src, ratio=16 / 9, width=None, cache_width=None, radius=3):
-    """Картинка з тлом-заглушкою (поки вантажиться або якщо її нема)."""
-    fallback = ft.Container(bgcolor=T.WALL_2, expand=True,
-                            content=ft.Icon(ft.Icons.MOVIE_ROUNDED, size=32, color=T.LINE),
-                            alignment=ft.Alignment.CENTER)
-    body = ft.Image(src=src, fit=ft.BoxFit.COVER, gapless_playback=True, error_content=fallback,
-                    cache_width=cache_width) if src else fallback
-    return ft.Container(body, width=width, height=width / ratio if width else None,
-                        aspect_ratio=None if width else ratio, bgcolor=T.WALL_2,
-                        border_radius=radius, clip_behavior=ft.ClipBehavior.ANTI_ALIAS)
-
-
-# ── рейтинг і жанри для карток (TMDB): не більше кількох запитів одночасно
+# ── кадри, рейтинг і жанри для карток — лише з TMDB (картинки сайту не вантажимо)
 _slots = None
+STILL = "w780"
 
 
-def card_meta(page, item, show, enabled=True):
-    """show(rating, genres) — одразу з кешу або після відповіді TMDB."""
+def _title_plate(title):
+    """Замість кадру (поки шукаємо чи якщо TMDB не знайшов): назва написом табло."""
+    return ft.Container(
+        ft.Text((title or "").upper(), size=T.S_SMALL + 1, weight=ft.FontWeight.W_800,
+                color=T.DIM, text_align=ft.TextAlign.CENTER, max_lines=3,
+                overflow=ft.TextOverflow.ELLIPSIS, style=ft.TextStyle(letter_spacing=1.5)),
+        alignment=ft.Alignment.CENTER, padding=14, bgcolor=T.WALL_2)
+
+
+def tmdb_still(page, item, width, on_meta=None, meta=True):
+    """Кадр 16:9 з TMDB: з кешу одразу, інакше — пошук (спершу укр. назва, потім
+    оригінальна). on_meta(rating, genres, late) — рейтинг і жанри заразом."""
     global _slots
-    if not enabled or not tmdb.enabled() or not item.get("url"):
-        return
-    known, m = tmdb.meta_cached(item["url"])
+    h = width / (16 / 9)
+    box = ft.Container(_title_plate(item.get("title")), width=width, height=h,
+                       bgcolor=T.WALL_2, border_radius=3, clip_behavior=ft.ClipBehavior.ANTI_ALIAS)
+
+    def put(src):
+        if src:
+            box.content = ft.Image(src=src, fit=ft.BoxFit.COVER, gapless_playback=True,
+                                   width=width, height=h,
+                                   error_content=_title_plate(item.get("title")))
+
+    known, src = tmdb.cached(item["url"], STILL) if item.get("url") else (True, None)
     if known:
-        if m and (m["rating"] or m["genres"]):
-            show(m["rating"], m["genres"], False)
-        return
+        put(src)
+        if on_meta and meta:
+            k2, m = tmdb.meta_cached(item["url"])
+            if k2:
+                if m and (m["rating"] or m["genres"]):
+                    on_meta(m["rating"], m["genres"], False)
+                return box
+        else:
+            return box
+    if not tmdb.enabled() or not item.get("url"):
+        return box
     if _slots is None:
-        _slots = asyncio.Semaphore(3)
+        _slots = asyncio.Semaphore(4)
 
     async def look():
+        import core
         try:
             async with _slots:
-                import core
-                m = await asyncio.wait_for(asyncio.to_thread(
-                    tmdb.meta, item["url"], item.get("title", ""), item.get("orig", ""),
-                    item.get("year", ""), core.site_meta), 12)
+                if not known:
+                    url = await asyncio.wait_for(asyncio.to_thread(
+                        tmdb.backdrop, item["url"], item.get("title", ""), item.get("orig", ""),
+                        item.get("year", ""), STILL), 15)
+                    put(url)
+                    try:
+                        box.update()
+                    except Exception:
+                        return
+                if on_meta and meta:
+                    m = await asyncio.wait_for(asyncio.to_thread(
+                        tmdb.meta, item["url"], item.get("title", ""), item.get("orig", ""),
+                        item.get("year", ""), core.site_meta), 15)
+                    if m and (m["rating"] or m["genres"]):
+                        on_meta(m["rating"], m["genres"], True)
         except Exception:
-            return
-        if m and (m["rating"] or m["genres"]):
-            show(m["rating"], m["genres"], True)
+            pass
 
     page.run_task(look)
+    return box
 
 
 def poster_card(page, item, on_open, width, meta=True, autofocus=False):
-    """Афіша: кадр 16:9, під ним назва й рядок «★ 7.6 · Драма». Вибрана — у рамці табло."""
+    """Афіша: кадр 16:9 (TMDB), під ним назва й рядок «★ 7.6 · Драма». Вибрана — у рамці."""
     title = ft.Text(item.get("title") or "", size=T.S_BODY, weight=ft.FontWeight.W_700,
                     color=T.INK, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
     sub = ft.Text(item.get("orig") or " ", size=T.S_SMALL, color=T.DIM, max_lines=1,
                   overflow=ft.TextOverflow.ELLIPSIS)
     age = ft.Container(
         ft.Text(item.get("age") or "", size=T.S_SMALL - 2, weight=ft.FontWeight.W_800,
-                color=T.LETTER), bgcolor=T.BOARD, padding=ft.Padding.symmetric(horizontal=5, vertical=1),
+                color=T.LETTER), bgcolor=T.BOARD,
+        padding=ft.Padding.symmetric(horizontal=5, vertical=1),
         border_radius=2, visible=bool(item.get("age")), left=8, top=8)
-    pic = ft.Stack([image(item.get("poster"), width=width,
-                          cache_width=int(width * 1.6)), age], width=width, height=width / (16 / 9))
 
     def show(rating, genres, late):
         bits = ([f"★ {rating:.1f}"] if rating else []) + list(genres[:2])
@@ -143,7 +168,8 @@ def poster_card(page, item, on_open, width, meta=True, autofocus=False):
             except Exception:
                 pass
 
-    card_meta(page, item, show, meta)
+    pic = ft.Stack([tmdb_still(page, item, width, show, meta), age],
+                   width=width, height=width / (16 / 9))
     body = ft.Column([pic, ft.Container(ft.Column([title, sub], spacing=2, tight=True),
                                         padding=ft.Padding.only(left=2, right=2, top=8))],
                      spacing=0, width=width, tight=True)
