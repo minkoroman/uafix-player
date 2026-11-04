@@ -26,10 +26,43 @@ class Grid:
             scroll_interval=200, on_scroll=self.on_scroll)
 
     def view(self):
-        self.body.controls = [ft.Container(self.title, padding=ft.Padding.only(left=6)),
-                              *self.extra, ft.Container(self.status, padding=ft.Padding.only(left=6)),
-                              self.grid]
+        # TV: «стінка» на всю ширину над усім — «вгору» з верхнього ряду не виводить у меню
+        top = [self.app.focus_wall(self.bounce, width=4000)] if self.app.tv else []
+        self.body.controls = top + [ft.Container(self.title, padding=ft.Padding.only(left=6)),
+                                    *self.extra, ft.Container(self.status, padding=ft.Padding.only(left=6)),
+                                    self.grid]
         return self.body
+
+    _rebuild = None  # як перебудувати елемент у фокусі (для «стінки» вгорі)
+
+    def bounce(self):
+        """Фокус влучив у «стінку» — назад на той самий елемент, але свіжий: Flutter пам'ятає
+        шлях фокуса, і зі старим елементом наступне «вниз» лише «поверталось» би на нього ж."""
+        return self._rebuild() if self._rebuild else None
+
+    def make_card(self, it, i, autofocus=False):
+        card = kit.poster_card(self.app.page, it, self.app.open_title, self.card_w,
+                               meta=self.app.store.settings.get("card_meta", True),
+                               autofocus=autofocus,
+                               on_focus=lambda f, i=i: f and self.card_focused(i))
+        card.data = it["url"]
+        card.item_ = it
+        return card
+
+    def card_focused(self, i):
+        self._rebuild = lambda: self.rebuild_card(i)
+        self.near_end(i)
+
+    def rebuild_card(self, i):
+        if i >= len(self.grid.controls):
+            return None
+        fresh = self.make_card(self.grid.controls[i].item_, i)
+        self.grid.controls[i] = fresh
+        try:
+            self.grid.update()
+        except Exception:
+            return None
+        return fresh
 
     def fetch_page(self, n):
         raise NotImplementedError
@@ -68,13 +101,8 @@ class Grid:
         for it in items:
             if it["url"] in known:
                 continue
-            n = len(self.grid.controls)
-            card = kit.poster_card(self.app.page, it, self.app.open_title, self.card_w,
-                                   meta=self.app.store.settings.get("card_meta", True),
-                                   autofocus=self.app.tv and not self.grid.controls,
-                                   on_focus=lambda f, n=n: f and self.near_end(n))
-            card.data = it["url"]
-            self.grid.controls.append(card)
+            self.grid.controls.append(self.make_card(
+                it, len(self.grid.controls), autofocus=self.app.tv and not self.grid.controls))
         self.has_more = len(items) >= 10
         self.busy = False
         try:
@@ -159,25 +187,36 @@ class Catalog(Grid):
 
     def render_filters(self):
         plates = []
+        foc = lambda i: (lambda f: f and self.filter_focused(i))  # noqa: E731
         if self.root in COLLECTIONS:
             name = next((n for n, p in COLLECTIONS[self.root] if p == self.path), None)
             plates.append(kit.plate(kit.label(f"Добірка: {name or 'усі'}"),
                                     on_click=lambda e: self.pick_collection(),
-                                    kind="lit" if name else "plain", pad=(14, 10)))
+                                    kind="lit" if name else "plain", pad=(14, 10),
+                                    on_focus=foc(0)))
         for f in self.filters:
             value = self.chosen.get(f["field"])
             name = dict(f["options"]).get(value, "Усі") if value else "Усі"
             plates.append(kit.plate(kit.label(f"{f['title']}: {name}"),
                                     on_click=lambda e, f=f: self.pick(f),
-                                    kind="lit" if value else "plain", pad=(14, 10)))
+                                    kind="lit" if value else "plain", pad=(14, 10),
+                                    on_focus=foc(len(plates))))
         if self.chosen:
             plates.append(kit.plate(kit.label("Скинути", ft.Icons.CLOSE_ROUNDED),
-                                    on_click=lambda e: self.apply({}), pad=(14, 10)))
+                                    on_click=lambda e: self.apply({}), pad=(14, 10),
+                                    on_focus=foc(len(plates))))
         self.filter_row.controls = plates
         try:
             self.filter_row.update()
         except Exception:
             pass
+
+    def filter_focused(self, i):
+        self._rebuild = lambda: self.rebuild_filter(i)
+
+    def rebuild_filter(self, i):
+        self.render_filters()
+        return self.filter_row.controls[i] if i < len(self.filter_row.controls) else None
 
     def pick(self, f):
         """Вікно з варіантами фільтра — плашками (зручно пультом)."""
@@ -241,7 +280,8 @@ class Search(Grid):
             bgcolor=T.WALL_2, border_color=T.LINE, focused_border_color=T.SIGNAL,
             border_radius=3, cursor_color=T.SIGNAL, color=T.INK,
             prefix_icon=ft.Icons.SEARCH_ROUNDED, on_submit=lambda e: self.run(e.control.value),
-            on_change=self.typed)
+            on_change=self.typed,
+            on_focus=lambda e: setattr(self, "_rebuild", lambda: self.field))
         self.recent = ft.Row(wrap=True, spacing=8, run_spacing=8)
         self.recent_box = ft.Container(
             ft.Column([kit.kicker("Нещодавні пошуки"), self.recent], spacing=10, tight=True),
@@ -332,11 +372,7 @@ class Favorites(Grid):
         favs = self.app.store.active_favorites()
         self.status.value = "" if favs else "Тут з'являться фільми, які ви додасте в обране"
         for i, it in enumerate(favs):
-            card = kit.poster_card(self.app.page, it, self.app.open_title, self.card_w,
-                                   meta=self.app.store.settings.get("card_meta", True),
-                                   autofocus=self.app.tv and i == 0,
-                                   on_focus=lambda f, i=i: f and self.near_end(i))
-            self.grid.controls.append(card)
+            self.grid.controls.append(self.make_card(it, i, autofocus=self.app.tv and i == 0))
         try:
             self.body.update()
         except Exception:
@@ -355,11 +391,7 @@ class History(Grid):
         self.status.value = "" if items else "Тут з'являться фільми й серіали, які ви дивились"
         for i, h in enumerate(items):
             it = {k: h.get(k, "") for k in ("url", "title", "orig", "poster", "age")}
-            card = kit.poster_card(self.app.page, it, self.app.open_title, self.card_w,
-                                   meta=self.app.store.settings.get("card_meta", True),
-                                   autofocus=self.app.tv and i == 0,
-                                   on_focus=lambda f, i=i: f and self.near_end(i))
-            self.grid.controls.append(card)
+            self.grid.controls.append(self.make_card(it, i, autofocus=self.app.tv and i == 0))
         try:
             self.body.update()
         except Exception:

@@ -86,7 +86,7 @@ class Home:
             padding=ft.Padding.only(left=app.side, right=app.side, top=14))] if app.mobile else []
         if app.tv:  # назва застосунку — у боковому меню; тут лише «стінка» на всю ширину:
             # зайве «вгору» з першого ряду лишає фокус на місці, а не виводить його в меню
-            top = [app.focus_wall(lambda: self.last_focus, width=4000)]
+            top = [app.focus_wall(self.bounce, width=4000)]
         self.last_focus = None
         self.list = ft.ListView(
             top + [self.board_section, self.fav_new] + [col for col, _ in self.shelves] +
@@ -168,15 +168,27 @@ class Home:
             items = items[:14] if self.app.tv else items[:24]
             # TV: фокус на афіші — показати весь ряд разом із заголовком (інакше список
             # прокручувався рівно до картки, і підпис ряду ховався вгорі)
-            cards = []
-            for it in items:
+            def make(i):
                 box = []
-                cards.append(kit.poster_card(
-                    self.app.page, it, self.app.open_title, w,
+                card = kit.poster_card(
+                    self.app.page, items[i], self.app.open_title, w,
                     meta=self.app.store.settings.get("card_meta", True),
                     on_focus=(lambda f, k=f"shelf-{path}", b=box: f and self.focused(k, b[0]))
-                    if self.app.tv else None))
-                box.append(cards[-1])
+                    if self.app.tv else None)
+                box.append(card)
+                card.rebuild = lambda: rebuild(i)  # для «стінки» вгорі (див. App.focus_wall)
+                return card
+
+            def rebuild(i):
+                fresh = make(i)
+                row.controls[i] = fresh
+                try:
+                    row.update()
+                except Exception:
+                    return None
+                return fresh
+
+            cards = [make(i) for i in range(len(items))]
             if self.app.tv and cards:  # замість «Усі» в заголовку — компактна плашка в кінці ряду
                 box = []
                 key = f"shelf-{path}"
@@ -259,6 +271,13 @@ class Home:
             self.fav_new.update()
         except Exception:
             pass
+
+    def bounce(self):
+        """«Вгору» з першого ряду влучило в «стінку» — назад на ту саму картку, але свіжу
+        (Flutter пам'ятає шлях фокуса: зі старою наступне «вниз» лише поверталось би на неї)."""
+        c = self.last_focus
+        rebuild = getattr(c, "rebuild", None)
+        return rebuild() if rebuild else c
 
     def focused(self, key, control):
         self.last_focus = control
