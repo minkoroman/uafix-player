@@ -103,7 +103,10 @@ class TitleScreen:
         # ── опис зі сторінки сайту; потоки шукаємо одразу ж, паралельно з розбором опису
         try:
             html = await kit.run_fast(core.fetch, self.item["url"])
-            streams = asyncio.ensure_future(kit.run_fast(core.page_streams, self.item["url"], html))
+            ready = core.prefetched_streams(self.item["url"])
+            streams = asyncio.ensure_future(
+                asyncio.sleep(0, ready) if ready is not None else
+                kit.run_fast(core.page_streams, self.item["url"], html))
             info = await kit.run_fast(core.parse_title, html, self.item["url"])
         except Exception as ex:
             self.status.controls = [T.text(core.friendly_error(ex, "сторінку"), color=T.SIGNAL)]

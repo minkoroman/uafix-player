@@ -105,7 +105,12 @@ class Catalog(Grid):
     def fetch_page(self, n):
         if self.chosen:
             return core.catalog_filtered(self.path, n, dict(self.chosen))
-        return core.parse_catalog(core.fetch(core.catalog_url(self.path, n)))
+        items = core.parse_catalog(core.fetch(core.catalog_url(self.path, n)))
+        if items:  # наступну сторінку — наперед: прокрутка далі без очікування
+            import threading
+            threading.Thread(target=core.prefetch, args=(core.catalog_url(self.path, n + 1),),
+                             daemon=True).start()
+        return items
 
     def shown(self):
         if not self.page_no and not self.busy:

@@ -203,7 +203,7 @@ async def _prefetch_later(url, n):
         return  # пішли далі
     import core
     try:
-        await run_fast(core.prefetch, url)
+        await run_fast(core.prefetch, url, True)
     except Exception:
         pass
 

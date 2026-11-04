@@ -87,14 +87,15 @@ def _player_page(url):
     return urlparse(url).netloc == urlparse(BASE).netloc and         bool(ITEM_PATH_RE.match(path) or EPISODE_LINK_RE.search(path) or "/sezon" in path)
 
 
-_PAGES = {}            # url → (час, html): сторінки тайтлів, завантажені наперед
+_PAGES = {}            # url → (час, html): сторінки, завантажені наперед
+_STREAMS = {}          # url → (час, потоки): плеєри сторінки тайтлу, знайдені наперед
 _PAGES_TTL = 180
 _pages_lock = threading.Lock()
 
 
-def prefetch(url):
-    """Завантажити сторінку тайтлу наперед (людина зупинилась на картці) — відкриється
-    одразу. Лише мережа, без розбору; помилки мовчки."""
+def prefetch(url, streams=False):
+    """Завантажити сторінку наперед (людина зупинилась на картці; наступна сторінка
+    каталогу) — відкриється одразу. streams — заразом знайти плеєри тайтлу. Помилки мовчки."""
     with _pages_lock:
         hit = _PAGES.get(url)
         if hit and time.time() - hit[0] < _PAGES_TTL:
@@ -111,6 +112,23 @@ def prefetch(url):
         if len(_PAGES) > 30:  # старші — геть
             for k, _ in sorted(_PAGES.items(), key=lambda kv: kv[1][0])[:len(_PAGES) - 30]:
                 _PAGES.pop(k, None)
+                _STREAMS.pop(k, None)
+    if streams and _player_page(url):
+        try:  # плеєри на сторінці (фільм / серіал з плейлистом) — теж наперед
+            found = page_streams(url, html)
+        except Exception:
+            return
+        with _pages_lock:
+            _STREAMS[url] = (time.time(), found)
+
+
+def prefetched_streams(url):
+    """Потоки сторінки, знайдені наперед (prefetch), або None."""
+    with _pages_lock:
+        hit = _STREAMS.pop(url, None)
+    if hit and time.time() - hit[0] < _PAGES_TTL:
+        return hit[1]
+    return None
 
 
 def fetch(url, referer=None, proxy=None, _cache=True):
