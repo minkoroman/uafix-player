@@ -63,6 +63,8 @@ class App:
         core.ABROAD["enabled"] = bool(self.store.settings.get("abroad", True))
         core.ABROAD["get_proxy"] = self.tor_proxy
         page.run_task(self.store.sync_loop)
+        from .updates import Updates
+        self.updates = Updates(self)
 
         from .home import Home
         from .catalog import Catalog, Search, Favorites
@@ -80,6 +82,7 @@ class App:
                                   padding=0, bgcolor=T.FACADE))
         page.update()  # без цього на телефоні до згортання/розгортання був сірий екран
         self.show("home")
+        page.run_task(self.updates.on_start)
 
     def tor_proxy(self):
         def android_launch(exits):

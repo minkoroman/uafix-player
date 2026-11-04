@@ -74,7 +74,7 @@ class Settings:
         rows = [T.caps("Налаштування", size=T.S_HEAD + 8)]
         rows += [self.section("Вигляд"),
                  self.row("Тема", dict(THEMES).get(appearance.CURRENT.get("theme"), "Темна"),
-                          self.switch_theme, "Діє після перезапуску застосунку"),
+                          self.switch_theme, "Застосунок перезапуститься"),
                  self.toggle("Рейтинг і жанр на картках", "card_meta")]
         rows += [self.section("Перегляд"),
                  self.choice("Якість відео", "quality", QUALITY),
@@ -96,6 +96,11 @@ class Settings:
         from .report import open_report
         rows += [self.section("Про застосунок"),
                  self.row("Повідомити про проблему", "", lambda e: open_report(self.app)),
+                 self.row("Перевірити оновлення", "",
+                          lambda e: self.app.page.run_task(self.app.updates.check, True)),
+                 self.toggle("Перевіряти оновлення автоматично", "auto_updates"),
+                 self.row("Що нового в цій версії", "",
+                          lambda e: self.app.page.run_task(self.app.updates.whats_new, True)),
                  ft.Container(T.text(f"UAFix Player {self.version()} · дані про фільми: TMDB",
                                      size=T.S_SMALL, color=T.DIM), padding=6)]
         self.body.controls = rows
@@ -116,8 +121,8 @@ class Settings:
         new = "light" if appearance.CURRENT.get("theme") != "light" else "dark"
         appearance.save("theme", new)
         appearance.CURRENT["theme"] = new
-        self.app.toast("Тему змінено — перезапустіть застосунок")
         self.render()
+        self.app.page.run_task(self.app.updates.restart)  # кольори — лише після перезапуску
 
     def ask_clear(self, e):
         def yes(ev):
