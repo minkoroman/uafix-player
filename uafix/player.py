@@ -30,6 +30,9 @@ class Player:
         self.ep = title.seasons[si]["episodes"][ei]
         self.entry = title.pick_source(self.ep)
         self.voice = self.entry.get("voice") or title.voice
+        # субтитри — як обирали востаннє для такого типу доріжки (оригінал / українська)
+        self.sub_key = "sub_orig" if core.is_original(self.voice) else "sub_ua"
+        self.sub_lang = app.store.settings.get(self.sub_key) or None
         self.alive = True
         self.shown_at = 0.0
         self.dur = 0
@@ -49,17 +52,18 @@ class Player:
             kw["enable_hardware_acceleration"] = False
         elif settings.get("hwdec") == "copy":
             kw["hardware_decoding_api"] = "mediacodec-copy" if app.android else "auto-copy"
-        try:
-            core.hls_variants(self.entry)  # якості — щоб узяти обрану (1080 / 720 / 480)
-        except Exception:
-            pass
+        # якості потоку (1080 / 720 / 480) уже запитано у фоні (TitleScreen.play)
         url = core.quality_url(self.entry["url"], settings.get("quality") or "1080")
+        base = 20 if app.mobile else 34 if app.tv else 28
         self.video = fv.Video(
             expand=True, autoplay=True, fill_color="#000000",
             title=self.title.item["title"],
             playlist=[fv.VideoMedia(url, http_headers=core.stream_headers(self.entry))],
             playlist_mode=fv.PlaylistMode.NONE,
             configuration=fv.VideoConfiguration(mpv_properties=props, **kw),
+            subtitle_track=self.track(),
+            subtitle_configuration=fv.VideoSubtitleConfiguration(text_style=ft.TextStyle(
+                size=base, color="#FFFFFF", weight=ft.FontWeight.W_600, bgcolor="#99000000")),
         )
         season = self.title.seasons[self.si]["name"]
         what = self.ep["label"] if len(self.title.all_episodes()) > 1 else ""
@@ -68,24 +72,28 @@ class Player:
         self.bar = ft.ProgressBar(value=0, color=T.SIGNAL, bgcolor="#33F1E6CC", bar_height=4)
         self.play_btn = kit.plate(ft.Icon(ft.Icons.PAUSE_ROUNDED, size=28),
                                   on_click=lambda e: self.app.page.run_task(self.toggle),
-                                  kind="board", pad=(18, 12))
+                                  kind="glass", pad=(18, 12))
         buttons = [
             kit.plate(ft.Icon(ft.Icons.REPLAY_10_ROUNDED, size=26),
-                      on_click=lambda e: self.app.page.run_task(self.seek_by, -10), pad=(14, 12)),
+                      on_click=lambda e: self.app.page.run_task(self.seek_by, -10), pad=(14, 12),
+                      kind="glass"),
             self.play_btn,
             kit.plate(ft.Icon(ft.Icons.FORWARD_30_ROUNDED, size=26),
-                      on_click=lambda e: self.app.page.run_task(self.seek_by, 30), pad=(14, 12)),
+                      on_click=lambda e: self.app.page.run_task(self.seek_by, 30), pad=(14, 12),
+                      kind="glass"),
         ]
         if self.has_next():
             buttons.append(kit.plate(kit.label("Наступна", ft.Icons.SKIP_NEXT_ROUNDED),
-                                     on_click=lambda e: self.app.page.run_task(self.next_episode)))
+                                     on_click=lambda e: self.app.page.run_task(self.next_episode),
+                                     kind="glass"))
+        options = self.option_buttons()
         heading = ft.Column([
             kit.kicker(" · ".join(x for x in (season if what else "", what, self.voice) if x),
                        color="#B8AC95"),
             ft.Text(self.title.info.get("title") or self.title.item["title"], size=T.S_HEAD + 6,
                     weight=ft.FontWeight.W_800, color="#F1E6CC", max_lines=1)], spacing=4, tight=True)
         back = kit.plate(ft.Icon(ft.Icons.ARROW_BACK_ROUNDED, size=24),
-                         on_click=lambda e: self.app.back(), pad=(12, 10))
+                         on_click=lambda e: self.app.back(), pad=(12, 10), kind="glass")
         top = ft.Container(ft.Row([back, heading], spacing=16), padding=ft.Padding.only(
             left=self.app.side, right=self.app.side, top=22, bottom=40),
             gradient=ft.LinearGradient(begin=ft.Alignment.TOP_CENTER,
@@ -93,8 +101,8 @@ class Player:
                                        colors=["#CC000000", "#00000000"]))
         bottom = ft.Container(ft.Column([
             self.bar,
-            ft.Row([ft.Row(buttons, spacing=10), self.time_text],
-                   alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            ft.Row([ft.Row(buttons, spacing=10), ft.Row(options + [self.time_text], spacing=10)],
+                   alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=self.app.mobile,
                    vertical_alignment=ft.CrossAxisAlignment.CENTER)], spacing=14),
             padding=ft.Padding.only(left=self.app.side, right=self.app.side, top=50, bottom=26),
             gradient=ft.LinearGradient(begin=ft.Alignment.BOTTOM_CENTER,
@@ -204,6 +212,78 @@ class Player:
                     return
             except Exception:
                 pass
+
+    # ── озвучка, субтитри, якість
+    def subs(self):
+        return self.entry.get("subs") or []
+
+    def track(self):
+        subs = self.subs()
+        sub = next((x for x in subs if x["lang"] == self.sub_lang), None) if self.sub_lang else None
+        if not sub:
+            return fv.VideoSubtitleTrack.none()
+        return fv.VideoSubtitleTrack(src=sub["url"], title=sub["title"], language=sub["lang"])
+
+    def voices(self):
+        return [s["entry"].get("voice") for s in self.ep["sources"] if s["entry"].get("voice")]
+
+    def option_buttons(self):
+        """Плашки праворуч: натискання — наступне значення."""
+        out = []
+        if len(set(self.voices())) > 1:
+            out.append(kit.plate(kit.label(self.voice, ft.Icons.MIC_ROUNDED),
+                                 on_click=lambda e: self.app.page.run_task(self.next_voice),
+                                 kind="glass", pad=(14, 12)))
+        if self.subs():
+            sub = next((x for x in self.subs() if x["lang"] == self.sub_lang), None)
+            self.sub_btn = kit.plate(kit.label(sub["title"] if sub else "Без субтитрів",
+                                               ft.Icons.SUBTITLES_ROUNDED),
+                                     on_click=lambda e: self.next_subs(), kind="glass",
+                                     pad=(14, 12))
+            out.append(self.sub_btn)
+        variants = core._VARIANTS.get(self.entry["url"]) or {}
+        if len(variants) > 1:
+            q = core.pick_quality(variants, self.app.store.settings.get("quality") or "1080")
+            out.append(kit.plate(kit.label(f"{q}p", ft.Icons.HD_ROUNDED),
+                                 on_click=lambda e: self.app.page.run_task(self.next_quality),
+                                 kind="glass", pad=(14, 12)))
+        return out
+
+    def next_subs(self):
+        langs = [None] + [x["lang"] for x in self.subs()]
+        i = (langs.index(self.sub_lang) + 1) % len(langs) if self.sub_lang in langs else 0
+        self.sub_lang = langs[i]
+        self.app.store.set(self.sub_key, self.sub_lang or "")
+        self.video.subtitle_track = self.track()
+        self.video.update()
+        sub = next((x for x in self.subs() if x["lang"] == self.sub_lang), None)
+        self.sub_btn.content = kit.label(sub["title"] if sub else "Без субтитрів",
+                                         ft.Icons.SUBTITLES_ROUNDED)
+        self.sub_btn.update()
+        self.show_overlay(False)
+
+    async def reopen(self):
+        """Та сама серія з того ж місця (інша озвучка чи якість)."""
+        pos = self.last[0] or self.start
+        self.app.back()
+        await asyncio.sleep(0.1)
+        Player(self.app, self.title, self.si, self.ei, pos).open()
+
+    async def next_voice(self):
+        voices = list(dict.fromkeys(self.voices()))
+        v = voices[(voices.index(self.voice) + 1) % len(voices)] if self.voice in voices else voices[0]
+        self.title.voice = v
+        self.app.store.remember_voice(self.title.item["url"], v)
+        self.title.render_voices()
+        await self.reopen()
+
+    async def next_quality(self):
+        keys = sorted(core._VARIANTS.get(self.entry["url"]) or {}, key=int, reverse=True)
+        cur = core.pick_quality(core._VARIANTS[self.entry["url"]],
+                                self.app.store.settings.get("quality") or "1080")
+        q = keys[(keys.index(cur) + 1) % len(keys)]
+        self.app.store.set("quality", q)
+        await self.reopen()
 
     def set_play_icon(self, playing):
         icon = ft.Icons.PAUSE_ROUNDED if playing else ft.Icons.PLAY_ARROW_ROUNDED

@@ -34,6 +34,9 @@ def plate(content, on_click=None, kind="plain", pad=(18, 14), radius=3, autofocu
     if kind == "board":
         bg = {CTRL.FOCUSED: T.SIGNAL, CTRL.HOVERED: T.SIGNAL, CTRL.DEFAULT: T.BOARD}
         fg = {CTRL.FOCUSED: "#FFFFFF", CTRL.HOVERED: "#FFFFFF", CTRL.DEFAULT: T.LETTER}
+    elif kind == "glass":  # поверх відео: завжди темна, незалежно від теми
+        bg = {CTRL.FOCUSED: "#F1E6CC", CTRL.HOVERED: "#F1E6CC", CTRL.DEFAULT: "#66000000"}
+        fg = {CTRL.FOCUSED: "#1A1714", CTRL.HOVERED: "#1A1714", CTRL.DEFAULT: "#F1E6CC"}
     elif kind == "lit":
         bg = {CTRL.DEFAULT: T.BOARD}
         fg = {CTRL.DEFAULT: T.LETTER}
@@ -42,6 +45,8 @@ def plate(content, on_click=None, kind="plain", pad=(18, 14), radius=3, autofocu
         fg = {CTRL.FOCUSED: T.LETTER, CTRL.HOVERED: T.LETTER, CTRL.DEFAULT: T.INK}
     side = {CTRL.FOCUSED: ft.BorderSide(3, T.SIGNAL if kind != "board" else T.INK),
             CTRL.DEFAULT: ft.BorderSide(0, ft.Colors.TRANSPARENT)}
+    if kind == "glass":
+        side[CTRL.DEFAULT] = ft.BorderSide(1, "#40F1E6CC")
     if kind == "plain":
         side[CTRL.DEFAULT] = ft.BorderSide(1, T.LINE)
     extra = {"expand": True} if expand else {}  # expand=False у рядку з переносом ламає розмітку

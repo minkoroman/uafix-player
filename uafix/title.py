@@ -327,6 +327,8 @@ class TitleScreen:
     async def play(self, si, ei, pos):
         """pos=None — з місця зупинки, якщо саме цю серію почали; 0 — спочатку."""
         ep = self.seasons[si]["episodes"][ei]
+        if ep["sources"] is None:
+            self.app.toast("Завантажую серію…")
         try:
             sources = await self.ensure_sources(ep)
         except Exception as ex:
@@ -342,8 +344,59 @@ class TitleScreen:
             pos = h.get("pos", 0) if h.get("si") == si and h.get("ei") == ei and \
                 not self.app.store.watched(h) else 0
         self.collect_voices()
+        if self.app.android:
+            mode = self.app.store.settings.get("player") or "ask"
+            if mode == "ask":
+                mode = await self.ask_player()
+                if not mode:
+                    return
+            if mode == "external":
+                await self.play_external(ep)
+                return
+        try:  # якості потоку — у фоні, щоб плеєр узяв обрану (мережа)
+            await asyncio.wait_for(asyncio.to_thread(core.hls_variants, self.pick_source(ep)), 12)
+        except Exception:
+            pass
         from .player import Player
         Player(self.app, self, si, ei, pos).open()
+
+    async def ask_player(self):
+        """Android: яким плеєром дивитись (запам'ятовується; змінити — у налаштуваннях)."""
+        done = asyncio.get_running_loop().create_future()
+
+        def pick(mode):
+            self.app.store.set("player", mode)
+            self.app.page.pop_dialog()
+            if not done.done():
+                done.set_result(mode)
+
+        dlg = ft.AlertDialog(
+            bgcolor=T.WALL, shape=ft.RoundedRectangleBorder(radius=4),
+            title=T.caps("Яким плеєром дивитись?", size=T.S_HEAD),
+            content=T.text("Вбудований пам'ятає, де ви зупинились, пропускає заставку й вмикає "
+                           "наступну серію. Інша програма — VLC, MX Player тощо. "
+                           "Змінити можна в налаштуваннях.", color=T.DIM),
+            actions=[kit.plate(kit.label("Інша програма"), lambda e: pick("external")),
+                     kit.plate(kit.label("Вбудований"), lambda e: pick("builtin"), kind="board",
+                               autofocus=True)],
+            on_dismiss=lambda e: (None if done.done() else done.set_result(None)))
+        self.app.page.show_dialog(dlg)
+        return await done
+
+    async def play_external(self, ep):
+        """Потік обраної якості — у сторонній програмі (вибір показує MainActivity)."""
+        from urllib.parse import urlencode
+        entry = self.pick_source(ep)
+        try:
+            await asyncio.to_thread(core.hls_variants, entry)
+            url = core.quality_url(entry["url"], self.app.store.settings.get("quality") or "1080")
+        except Exception:
+            url = entry["url"]
+        name = (self.info.get("title") or self.item["title"]) + \
+            (f" · {ep['label']}" if len(self.all_episodes()) > 1 else "")
+        await ft.UrlLauncher().launch_url(
+            "uafixupdate://external?" + urlencode({"url": url, "title": name}),
+            mode=ft.LaunchMode.EXTERNAL_APPLICATION)
 
     def pick_source(self, ep):
         by_voice = {s["entry"].get("voice"): s["entry"] for s in ep["sources"]}
