@@ -20,6 +20,7 @@ NAV = [
     ("Мультфільми", "/cartoons/", ft.Icons.CHILD_CARE_ROUNDED),
     ("Аніме", "/anime/", ft.Icons.AUTO_AWESOME_ROUNDED),
     ("Обране", "favorites", ft.Icons.BOOKMARK_ROUNDED),
+    ("Налаштування", "settings", ft.Icons.SETTINGS_ROUNDED),
 ]
 MOBILE_NAV = ("home", "search", "/films/", "/serials/", "favorites")
 BACK_KEYS = ("Escape", "Go Back", "Browser Back")
@@ -58,10 +59,13 @@ class App:
         await self.store.load()
         core.ABROAD["enabled"] = bool(self.store.settings.get("abroad", True))
         core.ABROAD["get_proxy"] = self.tor_proxy
+        page.run_task(self.store.sync_loop)
 
         from .home import Home
         from .catalog import Catalog, Search, Favorites
-        self.screens = {"home": Home(self), "search": Search(self), "favorites": Favorites(self)}
+        from .settings import Settings
+        self.screens = {"home": Home(self), "search": Search(self), "favorites": Favorites(self),
+                        "settings": Settings(self)}
         self.Catalog = Catalog
         self.content = ft.Container(expand=True)
         root = ft.Row([self.rail(), ft.VerticalDivider(width=1, color=T.LINE), self.content],

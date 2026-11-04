@@ -3,10 +3,13 @@
 Ключі й формат — ті самі, що й у попередній версії (та сама історія після оновлення,
 та сама синхронізація між пристроями). Позиція й тривалість в історії — у мілісекундах.
 """
+import asyncio
 import json
 import time
 
 import flet as ft
+
+import sync
 
 HISTORY_MAX = 40
 
@@ -33,6 +36,9 @@ class Store:
         self.voice_titles = {}   # адреса тайтлу → обрана озвучка
         self.voice_recent = []   # студії, які обирали останніми
         self.listeners = []      # викликаються, коли змінилась історія чи обране
+        self.sync_dirty = False  # є свої зміни, яких ще нема на сервері
+        self.sync_busy = False
+        self.sync_last = 0.0
 
     async def load(self):
         for key in self.settings:
@@ -61,7 +67,13 @@ class Store:
         self.page.run_task(self.prefs.set, key, value if isinstance(value, str)
                            else json.dumps(value, ensure_ascii=False))
 
-    def changed(self):
+    def changed(self, push=None):
+        """Історія / обране змінились: оновити екрани; push — одразу на сервер (True),
+        з найближчою синхронізацією (False) чи ні (None — дані прийшли із сервера)."""
+        if push is not None and self.settings.get("sync_code"):
+            self.sync_dirty = True
+            if push:
+                self.page.run_task(self.sync_now)
         for cb in list(self.listeners):
             try:
                 cb()
@@ -99,7 +111,7 @@ class Store:
         self.history[:] = [h] + [x for x in self.history if x["url"] != item["url"]]
         del self.history[HISTORY_MAX:]
         self._save("history", self.history)
-        self.changed()
+        self.changed(push=False)  # позиція — раз на хвилину, не щоразу
 
     def remove(self, url):
         """Прибрати з «Продовжити» (позначка removed — щоб синхронізація не повернула)."""
@@ -109,7 +121,7 @@ class Store:
         self.history[:] = [{"url": url, "title": old.get("title", ""), "ts": int(time.time()),
                             "removed": True}] + [h for h in self.history if h["url"] != url]
         self._save("history", self.history)
-        self.changed()
+        self.changed(push=True)
 
     # ── обране
     def is_favorite(self, url):
@@ -122,7 +134,7 @@ class Store:
             entry["removed"] = True
         self.favorites[:] = [entry] + [f for f in self.favorites if f["url"] != item["url"]]
         self._save("favorites", self.favorites)
-        self.changed()
+        self.changed(push=True)
         return added
 
     def active_favorites(self):
@@ -150,3 +162,61 @@ class Store:
             if v in voices:
                 return v
         return voices[0]
+
+    def clear_history(self):
+        """Очистити історію — позначка часу, щоб очистилась і на інших пристроях."""
+        self.history.clear()
+        self.set("history_cleared", int(time.time()))
+        self._save("history", self.history)
+        self.changed(push=True)
+
+    # ── синхронізація між пристроями (сервер — sync_worker/, злиття — sync.merge)
+    def sync_doc(self):
+        return {"history": self.history, "favorites": self.favorites,
+                "history_cleared": self.settings.get("history_cleared", 0) or 0}
+
+    def _signature(self):
+        return ([(h["url"], h.get("pos"), h.get("label")) for h in self.continuing()][:15],
+                [f["url"] for f in self.active_favorites()])
+
+    def apply_sync(self, doc):
+        """Злиті дані з усіх пристроїв → сюди (екрани — лише якщо щось справді змінилось)."""
+        if json.dumps(doc, sort_keys=True) == json.dumps(self.sync_doc(), sort_keys=True):
+            return
+        before = self._signature()
+        self.history[:] = doc.get("history") or []
+        self.favorites[:] = doc.get("favorites") or []
+        if doc.get("history_cleared", 0) != self.settings.get("history_cleared", 0):
+            self.set("history_cleared", doc.get("history_cleared", 0))
+        self._save("history", self.history)
+        self._save("favorites", self.favorites)
+        if self._signature() != before:
+            self.changed()
+
+    async def sync_now(self, manual=False):
+        """→ None, якщо все гаразд, або текст помилки."""
+        code = self.settings.get("sync_code")
+        if not code or self.sync_busy:
+            return None
+        self.sync_busy = True
+        try:
+            if self.sync_dirty or manual:
+                self.sync_dirty = False
+                merged = await asyncio.to_thread(sync.push, code, self.sync_doc())
+            else:  # свого нового нема — лише забрати зміни інших пристроїв
+                merged = sync.merge(self.sync_doc(), await asyncio.to_thread(sync.pull, code))
+            self.apply_sync(merged)
+            self.sync_last = time.time()
+            return None
+        except Exception as ex:
+            self.sync_dirty = True  # повториться наступного разу
+            import core
+            return core.friendly_error(ex, "синхронізацію")
+        finally:
+            self.sync_busy = False
+
+    async def sync_loop(self):
+        """Одразу на старті, далі — раз на хвилину."""
+        while True:
+            await self.sync_now()
+            await asyncio.sleep(60)

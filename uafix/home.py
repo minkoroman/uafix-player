@@ -41,8 +41,15 @@ class Home:
             self.board_box, padding=ft.Padding.only(left=app.side, right=app.side, top=28),
             visible=False)
         self.shelves = [self.shelf(*s) for s in SHELVES]
+        # телефон: назва й налаштування зверху (у нижньому меню — лише головні розділи)
+        top = [ft.Container(ft.Row([
+            T.caps("UAFix", size=22, weight=ft.FontWeight.W_900, spacing=0.06),
+            kit.plate(ft.Icon(ft.Icons.SETTINGS_ROUNDED, size=20),
+                      on_click=lambda e: app.show("settings", "Налаштування"), pad=(10, 10))],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            padding=ft.Padding.only(left=app.side, right=app.side, top=14))] if app.mobile else []
         self.list = ft.ListView(
-            [self.board_section] + [col for col, _ in self.shelves] + [ft.Container(height=40)],
+            top + [self.board_section] + [col for col, _ in self.shelves] + [ft.Container(height=40)],
             expand=True, spacing=0)
         self.loaded = False
         self.continue_urls = None
