@@ -158,7 +158,7 @@ class App:
         """Невидима кнопка-«стінка»: отримала фокус — одразу повертає його на край меню."""
         return self.focus_wall(lambda: self.rail_items[edge_key])
 
-    def focus_wall(self, target):
+    def focus_wall(self, target, width=None):
         """Невидима «стінка» на краю списку: фокус, що на неї потрапив, повертається на target()."""
         def back(e):
             kit.quiet()
@@ -167,6 +167,7 @@ class App:
                 self.page.run_task(self.keep_focus, t)
         return ft.Button(
             content=ft.Container(height=2), on_click=lambda e: None, height=2, on_focus=back,
+            width=width,  # широка — щоб Flutter бачив її «над» картками, а не меню
             style=ft.ButtonStyle(bgcolor=ft.Colors.TRANSPARENT, elevation=0, padding=0,
                                  overlay_color=ft.Colors.TRANSPARENT,
                                  shadow_color=ft.Colors.TRANSPARENT, animation_duration=0))

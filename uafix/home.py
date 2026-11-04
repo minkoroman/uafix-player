@@ -89,7 +89,7 @@ class Home:
                 padding=ft.Padding.only(left=app.side, right=app.side, top=22)),
                 # «стінка» на всю ширину: зайве «вгору» з першого ряду лишає фокус на місці,
                 # а не виводить його в ліве меню
-                app.focus_wall(lambda: self.last_focus)]
+                app.focus_wall(lambda: self.last_focus, width=4000)]
         self.last_focus = None
         self.list = ft.ListView(
             top + [self.board_section, self.fav_new] + [col for col, _ in self.shelves] + [ft.Container(height=40)],
