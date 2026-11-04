@@ -5,32 +5,42 @@ import appearance
 
 # ───────────── палітра ─────────────
 LIGHT = appearance.CURRENT["theme"] == "light"
-# Нейтральний графіт, як у Apple TV / Google TV: колір дають постери й кадри, а не
-# інтерфейс. Акцент (бренд) — лише там, де він щось означає: прогрес, вибране, активний розділ.
-if LIGHT:
-    BG = "#F5F5F7"
-    SURFACE = "#FFFFFF"
-    SURFACE_2 = "#FFFFFF"
-    SURFACE_3 = "#E8E8ED"
-    BORDER = "#14000000"
-    TEXT = "#1D1D1F"
-    MUTED = "#6E6E73"
-    ACCENT = "#E8542A"  # трохи темніший — контрастніший на білому
+# «Табло кінотеатру»: теплий темний фасад, табло зі слонової кістки з чорними наборними
+# літерами, сигнальний червоний — лише там, де щось означає (лишилось часу, вибране, фокус).
+if LIGHT:  # денний фасад: світлий камінь, табло — темне з літерами кольору кістки
+    BG = "#EFE9DD"
+    SURFACE = "#F7F3EA"
+    SURFACE_2 = "#FFFDF8"
+    SURFACE_3 = "#E2D9C8"
+    BORDER = "#1F1A1714"
+    TEXT = "#1A1714"
+    MUTED = "#6B6152"
+    ACCENT = "#C23A22"
+    BOARD_BG, BOARD_FG, BOARD_RULE, BOARD_MUTED = "#1F1B17", "#F1E6CC", "#3A332C", "#B8AC95"
+    BOARD_ACCENT = "#FF7A5C"
 else:
-    BG = "#0B0B0D"
-    SURFACE = "#141416"
-    SURFACE_2 = "#1C1C1F"
-    SURFACE_3 = "#2A2A2E"
-    BORDER = "#12FFFFFF"
-    TEXT = "#F5F5F7"
-    MUTED = "#A1A1A6"
-    ACCENT = "#FF6A3D"
-ACCENT_2 = "#FFB547"
+    BG = "#14110F"
+    SURFACE = "#1B1714"
+    SURFACE_2 = "#231E1A"
+    SURFACE_3 = "#302923"
+    BORDER = "#1CF1E6CC"
+    TEXT = "#F1E6CC"
+    MUTED = "#A89C86"
+    ACCENT = "#E0492E"
+    BOARD_BG, BOARD_FG, BOARD_RULE, BOARD_MUTED = "#F1E6CC", "#1A1714", "#D6C7A6", "#6B5E4B"
+    BOARD_ACCENT = "#B8321B"
+ACCENT_2 = "#E8B04B"
 GOLD = "#F5C518"
-# головна дія («Дивитись») — біла кнопка з темним текстом, як в Apple TV (у світлій темі — навпаки)
-PRIMARY_BG = "#1D1D1F" if LIGHT else "#F5F5F7"
-PRIMARY_FG = "#FFFFFF" if LIGHT else "#0B0B0D"
+# головна дія («Дивитись») — плашка табло: кістка з темними літерами (у світлій темі — навпаки)
+PRIMARY_BG = BOARD_BG
+PRIMARY_FG = BOARD_FG
 FONT = "Golos Text"  # український гротеск, добре читається з дивана; assets/fonts
+
+
+def marquee(text, size=18, color=None, weight=ft.FontWeight.W_800, **kw):
+    """Напис «як на табло»: великими літерами, розріджено."""
+    return ft.Text(text.upper(), size=size, weight=weight, color=color or TEXT,
+                   style=ft.TextStyle(letter_spacing=size * 0.08), **kw)
 
 EASE = ft.AnimationCurve.EASE_OUT_CUBIC
 FAST = ft.Animation(160, EASE)

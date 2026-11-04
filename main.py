@@ -296,10 +296,12 @@ def main(page: ft.Page, reopen=None):
         TV_FOCUS_ICON = TV_FOCUS_FG
         focus_ring = TV_FOCUS_BG
     else:
-        TV_FOCUS_BG = "#D9DDE3" if ui.LIGHT else "#2C3039"
-        TV_FOCUS_FG = TEXT
-        TV_FOCUS_ICON = ACCENT
-        focus_ring = "#15171C" if ui.LIGHT else "#FFFFFF"
+        # «Табло кінотеатру»: вибране — плашка табло (кістка з темними літерами; у світлій
+        # темі — темна з літерами кольору кістки)
+        TV_FOCUS_BG = ui.BOARD_BG
+        TV_FOCUS_FG = ui.BOARD_FG
+        TV_FOCUS_ICON = ui.BOARD_FG
+        focus_ring = ui.BOARD_BG
     TV_FOCUS_SIDE = {ft.ControlState.FOCUSED: ft.BorderSide(4, focus_ring),
                      ft.ControlState.DEFAULT: ft.BorderSide(0, ft.Colors.TRANSPARENT)}
     TV_FOCUS_TEXT = {ft.ControlState.FOCUSED: TV_FOCUS_FG, ft.ControlState.DEFAULT: TEXT}
@@ -916,32 +918,10 @@ def main(page: ft.Page, reopen=None):
                        "removed": True}] + [h for h in history if h["url"] != url]
         save_history()
         sync_changed(now=True)
-        if TV:
-            page.run_task(remove_tv_row, url)
-            return
-        # телефон / ПК: картка плавно стискається й зникає, але її місце в рядку лишається —
-        # якщо її вийняти, наступні картки зсуваються, перебудовуються й блимають постерами
-        # (зовсім прибереться при наступному оновленні поличк)
-        card = next((c for c in continue_row.controls if c.data == url), None)
-        if card is None:
-            return
-        card.width, card.opacity, card.data = 0, 0, None
-        try:
-            card.update()
-        except Exception:
-            pass
-        if not any(c.data for c in continue_row.controls):
-            async def hide_section():
-                await asyncio.sleep(0.35)
-                continue_section.visible = False
-                try:
-                    continue_section.update()
-                except Exception:
-                    pass
-            page.run_task(hide_section)
+        page.run_task(remove_tv_row, url)  # рядок табло стискається й зникає
 
     async def remove_tv_row(url):
-        """TV: спершу фокус — на попередній фільм (поки рядок ще на місці, інакше фокус
+        """Рядок табло «Продовжити». TV: спершу фокус — на попередній фільм (поки рядок ще на місці, інакше фокус
         падав на «Обране»), потім рядок плавно стискається й зникає."""
         box = continue_list
         rows = [c for c in box.controls if c.data]
@@ -1988,11 +1968,9 @@ def main(page: ft.Page, reopen=None):
 
     def rating_badge(rating):
         return ft.Container(
-            ft.Row([ft.Icon(ft.Icons.STAR_ROUNDED, size=12, color=ui.GOLD),
-                    ft.Text(f"{rating:.1f}", size=12, weight=ft.FontWeight.W_600,
-                            color="#FFFFFF")], spacing=3, tight=True),
-            padding=ft.Padding.symmetric(horizontal=7, vertical=3), border_radius=6,
-            bgcolor=ft.Colors.with_opacity(0.72, "#000000"))
+            ft.Text(f"{rating:.1f}", size=13, weight=ft.FontWeight.W_800, color="#1A1714"),
+            padding=ft.Padding.symmetric(horizontal=7, vertical=2), border_radius=2,
+            bgcolor="#F1E6CC")
 
     def grid_card(item, progress=None, caption=None, on_open=None, on_remove=None, tv_w=None):
         play = ft.Container(
@@ -2064,7 +2042,7 @@ def main(page: ft.Page, reopen=None):
         card = ft.Container(
             ft.Stack(layers, expand=True),
             # з «save layer» кути обрізаються чисто (без ореолу тіні біля рамки); на TV — простіше
-            border_radius=12, clip_behavior=ft.ClipBehavior.ANTI_ALIAS if TV
+            border_radius=4, clip_behavior=ft.ClipBehavior.ANTI_ALIAS if TV
             else ft.ClipBehavior.ANTI_ALIAS_WITH_SAVE_LAYER,
             # без рамки (крім TV): світла лінія на темних постерах виглядала як «скляний»
             # обідок
@@ -2096,7 +2074,7 @@ def main(page: ft.Page, reopen=None):
             ring_pad = 6  # 3 рамка + 3 зазор
             w = (tv_w or TV_CARD_W) - 2 * ring_pad
             card.width, card.height = w, w / POSTER_RATIO
-            outer = ft.Container(card, padding=3, border_radius=18, scale=1,
+            outer = ft.Container(card, padding=3, border_radius=8, scale=1,
                                  border=ft.Border.all(3, ft.Colors.TRANSPARENT))
 
             def ring(f):
@@ -2729,7 +2707,7 @@ def main(page: ft.Page, reopen=None):
                     width=shelf_card_w / 1.6, height=shelf_card_w / POSTER_RATIO,
                     bgcolor=SURFACE_2, border_radius=14, border=ft.Border.all(1, BORDER),
                     alignment=ft.Alignment.CENTER),
-                    lambda e: page.run_task(open_category, name, path), radius=14))
+                    lambda e: page.run_task(open_category, name, path), radius=8))
             row.controls = cards or [ft.Text("Не вдалося завантажити", color=MUTED)]
             try:
                 row.update()
@@ -2737,7 +2715,7 @@ def main(page: ft.Page, reopen=None):
                 pass
 
         header = ft.Row([
-            ft.Text(name, size=20 if is_mobile else 22, weight=ft.FontWeight.W_700, color=TEXT),
+            ui.marquee(name, size=16 if is_mobile else 19),
             ft.Container(expand=True),
             ft.TextButton("Усі", icon=ft.Icons.CHEVRON_RIGHT_ROUNDED, visible=not TV,
                           style=ft.ButtonStyle(color=MUTED, icon_color=MUTED),
@@ -2749,8 +2727,6 @@ def main(page: ft.Page, reopen=None):
 
     shelves = [shelf(*s) for s in SHELVES]
 
-    continue_row = ft.ListView(horizontal=True, spacing=16, height=shelf_card_w / POSTER_RATIO + 28,
-                               padding=ft.Padding.symmetric(horizontal=side, vertical=14))
 
     def clear_history():
         history.clear()
@@ -2763,15 +2739,99 @@ def main(page: ft.Page, reopen=None):
 
     # без spacing: проміжок — у самому рядку (нижній відступ), щоб при «Прибрати» він
     # стискався разом із рядком
-    continue_list = ft.Column(spacing=0)  # телевізор: «Продовжити перегляд» — списком
+    # «Продовжити перегляд» — табло кінотеатру: рядки-сеанси наборними літерами
+    continue_list = ft.Column(spacing=0)
     continue_section = ft.Column([
-        ft.Container(ft.Row([
-            ft.Text("Продовжити перегляд", size=20 if is_mobile else 22,
-                    weight=ft.FontWeight.W_700, color=TEXT),
-        ]), padding=ft.Padding.symmetric(horizontal=side)),
-        ft.Container(continue_list, padding=ft.Padding.only(left=side, right=side, top=12))
-        if TV else continue_row,
+        ft.Container(ui.marquee("Сьогодні в залі · Продовжити перегляд", size=13, color=MUTED,
+                                weight=ft.FontWeight.W_700),
+                     padding=ft.Padding.symmetric(horizontal=side)),
+        ft.Container(ft.Container(continue_list, bgcolor=ui.BOARD_BG, border_radius=4,
+                                  border=ft.Border.all(5, ui.BOARD_RULE),
+                                  clip_behavior=ft.ClipBehavior.HARD_EDGE),
+                     padding=ft.Padding.only(left=side, right=side, top=10, bottom=18)),
     ], spacing=0, visible=False)
+
+    def left_text(h):
+        """«Лишилось 34 хв» — як час до кінця сеансу."""
+        if not h.get("dur"):
+            return "Почато"
+        m = max(1, int((h["dur"] - h["pos"]) // 60000))  # мс
+        return f"Лишилось {m // 60} г {m % 60:02d} хв" if m >= 60 else f"Лишилось {m} хв"
+
+    def ep_text(h):
+        parts = [h["season"]] if h.get("season") else []
+        if h.get("label") and h["label"] != "Фільм":
+            parts.append(h["label"].split(" — ")[0])
+        return " · ".join(parts) or "Фільм"
+
+    def board_row(h, item, last):
+        """Рядок табло. Вибраний (пульт / миша) — інверсія: темна плашка, світлі літери."""
+        big = 15 if is_mobile else (24 if TV else 20)
+        small = 12 if is_mobile else (16 if TV else 14)
+        title = ft.Text(item["title"].upper(), size=big, weight=ft.FontWeight.W_800,
+                        color=ui.BOARD_FG, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                        style=ft.TextStyle(letter_spacing=big * 0.05))
+        ep = ft.Text(ep_text(h).upper(), size=small, weight=ft.FontWeight.W_600,
+                     color=ui.BOARD_MUTED, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                     style=ft.TextStyle(letter_spacing=1))
+        left = ft.Text(left_text(h).upper(), size=small, weight=ft.FontWeight.W_700,
+                       color=ui.BOARD_ACCENT, style=ft.TextStyle(letter_spacing=1))
+        voice = ft.Text((h.get("voice") or "").upper(), size=small, weight=ft.FontWeight.W_600,
+                        color=ui.BOARD_MUTED, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+        texts = [(title, ui.BOARD_FG), (ep, ui.BOARD_MUTED), (left, ui.BOARD_ACCENT),
+                 (voice, ui.BOARD_MUTED)]
+        open_ = lambda e=None: page.run_task(open_title, item)
+        remove = ft.IconButton(ft.Icons.CLOSE_ROUNDED, icon_size=18 if not TV else 22,
+                               tooltip="Прибрати з історії",
+                               on_click=lambda e, url=item["url"]: remove_from_history(url),
+                               visible=TV or is_mobile, style=ft.ButtonStyle(
+                                   bgcolor={ft.ControlState.FOCUSED: ui.BOARD_FG,
+                                            ft.ControlState.DEFAULT: ft.Colors.TRANSPARENT},
+                                   icon_color={ft.ControlState.FOCUSED: ui.BOARD_BG,
+                                               ft.ControlState.DEFAULT: ui.BOARD_MUTED}))
+        if is_mobile:
+            body = ft.Column([title, ft.Row([ep, left], spacing=12)], spacing=2, tight=True)
+        else:
+            body = ft.Row([ft.Container(title, expand=True),
+                           ft.Container(ep, width=230 if TV else 200),
+                           ft.Container(left, width=230 if TV else 200),
+                           ft.Container(voice, width=150 if TV else 130)], spacing=16,
+                          vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        cell = ft.Container(body, expand=True, height=(64 if is_mobile else 72 if TV else 58),
+                            padding=ft.Padding.only(left=18 if is_mobile else 26, right=8),
+                            alignment=ft.Alignment.CENTER_LEFT)
+
+        def invert(on):
+            for t, c in texts:
+                t.color = ui.BOARD_BG if on else c
+            if TV:
+                return
+            cell.bgcolor = ui.BOARD_FG if on else None
+            if not is_mobile:
+                remove.visible = on
+            cell.update()
+            remove.update()
+
+        if TV:
+            row_btn = focusable(cell, lambda e: open_(), on_focus_change=lambda f: (
+                invert(f), cell.update()), radius=0,
+                focus_bg=(ui.BOARD_FG, ft.Colors.TRANSPARENT))
+            row_btn.expand = True
+            main_part = row_btn
+        else:
+            cell.on_click = open_
+            cell.on_hover = lambda e: invert(ui.hovered(e))
+            main_part = cell
+        row = ft.Container(
+            ft.Row([main_part, remove], spacing=0,
+                   vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            data=h["url"], border=None if last else ft.Border.only(
+                bottom=ft.BorderSide(2, ui.BOARD_RULE)),
+            animate=ui.MED, animate_opacity=ui.MED, opacity=1,
+            clip_behavior=ft.ClipBehavior.HARD_EDGE)
+        row.refs = {"left": left, "ep": ep}
+        row.focus_target = main_part
+        return row
 
     def update_continue_in_place(items, cards):
         """Той самий список (ті самі тайтли в тому ж порядку) — лише новий підпис і смужка.
@@ -2781,6 +2841,12 @@ def main(page: ft.Page, reopen=None):
             refs = getattr(card, "refs", None)
             if refs is None:
                 return False
+            if "left" in refs:  # рядок табло
+                for key, val in (("left", left_text(h).upper()), ("ep", ep_text(h).upper())):
+                    if refs[key].value != val:
+                        refs[key].value = val
+                        changed.append(refs[key])
+                continue
             cap, bar = refs.get("caption"), refs.get("progress")
             new_cap = resume_caption(h)
             new_val = h["pos"] / h["dur"] if h.get("dur") else None
@@ -2807,74 +2873,33 @@ def main(page: ft.Page, reopen=None):
                 update_continue_in_place(items, st.get("continue_cards") or []):
             if TV and focus and st.get("continue_cards") and len(page.views) <= 1 \
                     and st["mode"][0] == "home":
-                page.run_task(focus_later, st["continue_cards"][0])
+                page.run_task(focus_later, getattr(st["continue_cards"][0], "focus_target",
+                                                   st["continue_cards"][0]))
             return
         st["continue_urls"] = urls
-        if TV:
-            cards = [
-                list_card({k: h.get(k, "") for k in ("url", "title", "orig", "poster", "age")},
-                          caption=resume_caption(h),
-                          progress=h["pos"] / h["dur"] if h.get("dur") else None,
-                          autofocus=i == 0,
-                          on_open=lambda h=h: page.run_task(
-                              open_title, {k: h.get(k, "") for k in
-                                           ("url", "title", "orig", "poster", "age")}))
-                for i, h in enumerate(items[:6])]
-            st["continue_cards"] = cards
-            for c in cards:
-                c.expand = True
-            # праворуч від кожного рядка — «Прибрати» (пультом: стрілка вправо → OK)
-            # рядок — у контейнері, щоб при «Прибрати» плавно стиснути його й сховати
-            continue_list.controls = [
-                ft.Container(ft.Row([c, tv_tap(ft.Container(
-                    ft.Column([ft.Icon(ft.Icons.CLOSE_ROUNDED, size=26),
-                               ft.Text("Прибрати", size=13)],
-                              horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                              alignment=ft.MainAxisAlignment.CENTER, spacing=4),
-                    width=120, height=121, border_radius=14, bgcolor=SURFACE,
-                    border=ft.Border.all(1, BORDER), alignment=ft.Alignment.CENTER),
-                    lambda e, url=h["url"]: remove_from_history(url), radius=14,
-                    focus_bg=(TV_FOCUS_BG, SURFACE))], spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                    data=h["url"], height=131, padding=ft.Padding.only(bottom=10),
-                    opacity=1, animate=ui.MED,
-                    animate_opacity=ui.MED, clip_behavior=ft.ClipBehavior.HARD_EDGE)
-                for c, h in zip(cards, items[:6])]
-            try:
-                continue_section.update()
-            except Exception:
-                pass
-            # фокус — на перший пункт (autofocus у вже показаному екрані не спрацьовує,
-            # і після повернення назад фокус губився)
-            target = cards[0] if cards else (tv_first_tile[0] if tv_first_tile else None)
-            if focus and target is not None and len(page.views) <= 1 and st["mode"][0] == "home":
-                page.run_task(focus_later, target)
-            return
-        cards = []
-        for h in items:
-            item = {k: h.get(k, "") for k in ("url", "title", "orig", "poster", "age")}
-            c = grid_card(item, progress=h["pos"] / h["dur"] if h.get("dur") else 0,
-                          caption=resume_caption(h),
-                          on_open=lambda item=item: page.run_task(open_title, item),
-                          on_remove=lambda url=item["url"]: remove_from_history(url))
-            ui.reveal(c)
-            cards.append(ft.Container(c, width=shelf_card_w, data=item["url"],
-                                      animate=ui.MED, animate_opacity=ui.FAST))
-            cards[-1].refs = c.refs
-        st["continue_cards"] = cards
-        continue_row.controls = cards
+        shown = items[:5 if not is_mobile else 4]
+        rows = [board_row(h, {k: h.get(k, "") for k in ("url", "title", "orig", "poster", "age")},
+                          i == len(shown) - 1) for i, h in enumerate(shown)]
+        st["continue_cards"] = rows
+        continue_list.controls = rows
         try:
             continue_section.update()
         except Exception:
             pass  # головна ще не на екрані
+        if TV:
+            # фокус — на перший рядок (autofocus у вже показаному екрані не спрацьовує)
+            target = rows[0].focus_target if rows else (tv_first_tile[0] if tv_first_tile else None)
+            if focus and target is not None and len(page.views) <= 1 and st["mode"][0] == "home":
+                page.run_task(focus_later, target)
 
     def section_tile(name, path, icon, autofocus=False, last=False):
         # кольори тексту й іконки не задані — їх дає кнопка залежно від вибору (див. focusable)
         tile = ft.Container(
-            ft.Row([ft.Icon(icon, size=28), ft.Text(name, size=18, weight=ft.FontWeight.W_600)],
-                   spacing=14),
+            ft.Row([ft.Icon(icon, size=26),
+                    ft.Text(name.upper(), size=17, weight=ft.FontWeight.W_700,
+                            style=ft.TextStyle(letter_spacing=1.2))], spacing=14),
             height=76, padding=ft.Padding.symmetric(horizontal=20),
-            bgcolor=SURFACE_2, border_radius=14, border=ft.Border.all(1, BORDER),
+            bgcolor=SURFACE_2, border_radius=4, border=ft.Border.all(1, BORDER),
             alignment=ft.Alignment.CENTER_LEFT)
 
         def lit(f):
@@ -2886,7 +2911,7 @@ def main(page: ft.Page, reopen=None):
         # вибрана плитка — оранжева, як кнопка «Пошук»
         btn = tv_tap(tile, lambda e: page.run_task(open_category, name, path),
                      highlight=lit if last else None,
-                     radius=14, autofocus=autofocus, focus_bg=(TV_FOCUS_BG, SURFACE_2))
+                     radius=4, autofocus=autofocus, focus_bg=(TV_FOCUS_BG, SURFACE_2))
         btn.col = 4  # по три в ряд на всю ширину екрана
         return btn
 
@@ -2902,7 +2927,7 @@ def main(page: ft.Page, reopen=None):
             if not blocks:
                 tv_first_tile.append(tiles[0])
             blocks.append(ft.Column([
-                ft.Text(group, size=22, weight=ft.FontWeight.W_700, color=TEXT),
+                ui.marquee(group, size=15, color=MUTED, weight=ft.FontWeight.W_700),
                 ft.ResponsiveRow(tiles, spacing=16, run_spacing=16),
             ], spacing=12))
         return ft.Container(ft.Column(blocks, spacing=28),
