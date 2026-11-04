@@ -40,6 +40,8 @@ class Home:
         self.board_section = ft.Container(
             self.board_box, padding=ft.Padding.only(left=app.side, right=app.side, top=28),
             visible=False)
+        self.fav_new = ft.Container(padding=ft.Padding.only(left=app.side, right=app.side, top=24),
+                                    visible=False)
         self.shelves = [self.shelf(*s) for s in SHELVES]
         # телефон: назва й налаштування зверху (у нижньому меню — лише головні розділи)
         top = [ft.Container(ft.Row([
@@ -49,7 +51,7 @@ class Home:
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             padding=ft.Padding.only(left=app.side, right=app.side, top=14))] if app.mobile else []
         self.list = ft.ListView(
-            top + [self.board_section] + [col for col, _ in self.shelves] + [ft.Container(height=40)],
+            top + [self.board_section, self.fav_new] + [col for col, _ in self.shelves] + [ft.Container(height=40)],
             expand=True, spacing=0)
         self.loaded = False
         self.continue_urls = None
@@ -64,6 +66,7 @@ class Home:
             self.loaded = True
             for _, load in self.shelves:
                 self.app.page.run_task(load)
+            self.app.page.run_task(self.check_fav_new)
 
     # ── табло «Продовжити перегляд»
     def refresh_board(self, focus=False):
@@ -140,3 +143,29 @@ class Home:
                 pass
 
         return ft.Column([head, row], spacing=0), load
+
+    async def check_fav_new(self):
+        """Серіали з «Обраного», у яких щойно вийшла нова серія (розділ сайту «Нові серії»)."""
+        favs = {f["url"] for f in self.app.store.active_favorites()}
+        if not favs:
+            return
+        fresh = []
+        for n in (1, 2):
+            try:
+                items = await asyncio.to_thread(lambda n=n: core.parse_catalog(
+                    core.fetch(core.catalog_url("/serials/new_uaserial/", n))))
+            except Exception:
+                break
+            fresh += [it for it in items if it["url"] in favs and it not in fresh]
+        if not fresh:
+            return
+        rows = [kit.board_row([(it["title"], 3, "main"), ("Нова серія", 1, "signal")],
+                              on_click=lambda e, it=it: self.app.open_title(it),
+                              last=i == len(fresh[:6]) - 1)
+                for i, it in enumerate(fresh[:6])]
+        self.fav_new.content = kit.board(rows, "Нові серії ваших серіалів")
+        self.fav_new.visible = True
+        try:
+            self.fav_new.update()
+        except Exception:
+            pass
