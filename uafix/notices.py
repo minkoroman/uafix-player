@@ -54,6 +54,7 @@ class Notices:
     async def loop(self):
         if updater.VERSION == "dev":
             return
+        await asyncio.sleep(60)  # не заважати першому завантаженню (оновлення й так перевіряє Updates)
         while True:
             try:
                 rel = await asyncio.to_thread(updater.latest_release)

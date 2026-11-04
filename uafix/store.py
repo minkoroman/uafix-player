@@ -43,32 +43,35 @@ class Store:
         self.sync_last = 0.0
 
     async def load(self):
-        for key in self.settings:
+        # усі ключі — одночасно (кожне читання — окреме звернення до Flutter; на ТВ по черзі
+        # це помітна затримка перед першим екраном)
+        lists = ("history", "favorites", "voice_recent", "searches")
+        keys = list(self.settings) + list(lists) + ["airplay_creds", "voice_titles"]
+
+        async def get(key):
             try:
-                value = await self.prefs.get(key)
+                return await self.prefs.get(key)
             except Exception:
-                value = None
-            if value is not None:
-                self.settings[key] = value
-        for key, attr in (("history", "history"), ("favorites", "favorites"),
-                          ("voice_recent", "voice_recent"), ("searches", "searches")):
+                return None
+        values = dict(zip(keys, await asyncio.gather(*(get(k) for k in keys))))
+        for key in self.settings:
+            if values.get(key) is not None:
+                self.settings[key] = values[key]
+        for key in lists:
             try:
-                raw = await self.prefs.get(key)
-                if raw:
-                    setattr(self, attr, json.loads(raw))
+                if values.get(key):
+                    setattr(self, key, json.loads(values[key]))
             except Exception:
                 pass
         try:  # ключі спарювання AirPlay
-            raw = await self.prefs.get("airplay_creds")
-            if raw:
+            if values.get("airplay_creds"):
                 import airplay
-                airplay.CREDENTIALS.update(json.loads(raw))
+                airplay.CREDENTIALS.update(json.loads(values["airplay_creds"]))
         except Exception:
             pass
         try:
-            raw = await self.prefs.get("voice_titles")
-            if raw:
-                self.voice_titles.update(json.loads(raw))
+            if values.get("voice_titles"):
+                self.voice_titles.update(json.loads(values["voice_titles"]))
         except Exception:
             pass
 

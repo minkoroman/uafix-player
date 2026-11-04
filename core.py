@@ -87,12 +87,43 @@ def _player_page(url):
     return urlparse(url).netloc == urlparse(BASE).netloc and         bool(ITEM_PATH_RE.match(path) or EPISODE_LINK_RE.search(path) or "/sezon" in path)
 
 
-def fetch(url, referer=None, proxy=None):
+_PAGES = {}            # url → (час, html): сторінки тайтлів, завантажені наперед
+_PAGES_TTL = 180
+_pages_lock = threading.Lock()
+
+
+def prefetch(url):
+    """Завантажити сторінку тайтлу наперед (людина зупинилась на картці) — відкриється
+    одразу. Лише мережа, без розбору; помилки мовчки."""
+    with _pages_lock:
+        hit = _PAGES.get(url)
+        if hit and time.time() - hit[0] < _PAGES_TTL:
+            return
+        _PAGES[url] = (time.time(), None)  # уже вантажимо — не вдруге
+    try:
+        html = fetch(url, _cache=False)
+    except Exception:
+        with _pages_lock:
+            _PAGES.pop(url, None)
+        return
+    with _pages_lock:
+        _PAGES[url] = (time.time(), html)
+        if len(_PAGES) > 30:  # старші — геть
+            for k, _ in sorted(_PAGES.items(), key=lambda kv: kv[1][0])[:len(_PAGES) - 30]:
+                _PAGES.pop(k, None)
+
+
+def fetch(url, referer=None, proxy=None, _cache=True):
     """Сторінка за адресою. За кордоном сайт замість плеєра показує трейлер і «змініть
     країну перегляду» — тоді сторінку з плеєром беремо через український проксі (а коли
     вже знаємо, що ми за кордоном, — одразу через нього)."""
     if proxy:
         return _get(url, referer, proxy)
+    if _cache and not referer:
+        with _pages_lock:
+            hit = _PAGES.get(url)
+        if hit and hit[1] is not None and time.time() - hit[0] < _PAGES_TTL:
+            return hit[1]
     abroad = ABROAD["enabled"] and _player_page(url)
     if abroad and GEO["site"]:
         html = _fetch_abroad(url, referer, site=True)
@@ -337,6 +368,7 @@ def resolve_category(path):
 
 
 _HOME = {"at": 0.0, "blocks": {}}
+_home_lock = threading.Lock()  # полички стартують разом — головну сайту вантажимо раз
 
 
 def home_blocks(max_age=300):
@@ -345,7 +377,14 @@ def home_blocks(max_age=300):
     надходження часто опиняються на другій сторінці. Кеш — кілька хвилин на всі полички."""
     if time.time() - _HOME["at"] < max_age and _HOME["blocks"]:
         return _HOME["blocks"]
-    soup = BeautifulSoup(fetch(BASE + "/"), "html.parser")
+    with _home_lock:
+        if time.time() - _HOME["at"] < max_age and _HOME["blocks"]:
+            return _HOME["blocks"]  # поки чекали — вже завантажила інша поличка
+        return _load_home_blocks()
+
+
+def _load_home_blocks():
+    soup = BeautifulSoup(_CODE_RE.sub(" ", fetch(BASE + "/")), "html.parser")
     blocks = {}
     for sect in soup.select("main div.sect"):
         title = sect.select_one(".sect-title")
