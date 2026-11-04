@@ -33,6 +33,7 @@ class App:
         self.mobile = (page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS)
                        and not T.TV) or os.environ.get("UAFIX_MOBILE") == "1"
         self.android = page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.ANDROID_TV)
+        T.configure(self.mobile)  # розміри шрифтів — під телефон / TV / ПК
         self.side = 18 if self.mobile else 44
         self.key_handler = None   # клавіші для поточного екрана (плеєр)
         self.section = "home"
@@ -70,6 +71,7 @@ class App:
         page.views.append(ft.View(route="/", controls=[ft.SafeArea(root, expand=True)
                                                        if self.mobile else root],
                                   padding=0, bgcolor=T.FACADE))
+        page.update()  # без цього на телефоні до згортання/розгортання був сірий екран
         self.show("home")
 
     def tor_proxy(self):
@@ -101,8 +103,10 @@ class App:
         dests = [(n, k, i) for n, k, i in NAV if k in MOBILE_NAV]
         self.mobile_keys = [k for _, k, _ in dests]
         return ft.NavigationBar(
-            destinations=[ft.NavigationBarDestination(icon=i, label=n) for n, _, i in dests],
-            bgcolor=T.WALL, indicator_color=T.BOARD, height=64,
+            destinations=[ft.NavigationBarDestination(
+                icon=ft.Icon(i, color=T.INK), selected_icon=ft.Icon(i, color=T.LETTER), label=n)
+                for n, _, i in dests],
+            bgcolor=T.WALL, indicator_color=T.BOARD, height=68,
             label_behavior=ft.NavigationBarLabelBehavior.ALWAYS_SHOW,
             on_change=lambda e: self.show(self.mobile_keys[e.control.selected_index]))
 

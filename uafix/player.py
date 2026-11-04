@@ -100,14 +100,23 @@ class Player:
             gradient=ft.LinearGradient(begin=ft.Alignment.BOTTOM_CENTER,
                                        end=ft.Alignment.TOP_CENTER,
                                        colors=["#E6000000", "#00000000"]))
+        # середина: тап — показати панель, а коли вона видна — пауза / продовження.
+        # Майже прозорий фон обов'язковий: без нього дотики «провалювались» у відео.
+        self.center_icon = ft.Container(
+            ft.Icon(ft.Icons.PAUSE_ROUNDED, size=44, color="#F1E6CC"), width=96, height=96,
+            border_radius=48, bgcolor="#99000000", alignment=ft.Alignment.CENTER,
+            visible=not self.app.tv)
+        middle = ft.GestureDetector(
+            ft.Container(self.center_icon, expand=True, bgcolor="#01000000",
+                         alignment=ft.Alignment.CENTER),
+            on_tap=lambda e: (kit.quiet(), self.app.page.run_task(self.tap_center)),
+            on_hover=lambda e: (kit.quiet(), self.show_overlay(False)), expand=True)
+        self.top, self.bottom = top, bottom
         # шари стопки — прив'язані до країв (без цього панель не мала розміру й не малювалась)
-        self.overlay = ft.Container(
-            ft.Column([top, ft.Container(expand=True), bottom], spacing=0),
-            left=0, top=0, right=0, bottom=0, opacity=1, animate_opacity=T.FAST)
-        tap = ft.GestureDetector(on_tap=lambda e: (kit.quiet(), self.show_overlay()),
-                                 on_hover=lambda e: (kit.quiet(), self.show_overlay(False)),
-                                 left=0, top=0, right=0, bottom=0)
-        stack = ft.Stack([self.video, tap, self.overlay], expand=True)
+        self.overlay = ft.Container(ft.Column([top, middle, bottom], spacing=0),
+                                    left=0, top=0, right=0, bottom=0)
+        self.overlay.opacity = 1
+        stack = ft.Stack([self.video, self.overlay], expand=True)
         self.view = self.app.push("/play", stack, bgcolor="#000000")
         self.view.on_close = self.close
         self.app.key_handler = self.on_key
@@ -117,9 +126,13 @@ class Player:
 
     # ── панель
     def show_overlay(self, focus=True):
+        """Панель видна: кнопки на місці (схована — їх немає зовсім, щоб не натиснути
+        невидиму). overlay.opacity — лише позначка «видно / ні»."""
         self.shown_at = time.monotonic()
         if self.overlay.opacity != 1:
             self.overlay.opacity = 1
+            self.top.visible = self.bottom.visible = True
+            self.center_icon.visible = not self.app.tv
             self.overlay.update()
             if focus and self.app.tv:
                 self.app.page.run_task(self.play_btn.focus)
@@ -127,7 +140,14 @@ class Player:
     def hide_overlay(self):
         if self.overlay.opacity != 0:
             self.overlay.opacity = 0
+            self.top.visible = self.bottom.visible = self.center_icon.visible = False
             self.overlay.update()
+
+    async def tap_center(self):
+        if self.overlay.opacity != 1:
+            self.show_overlay(False)
+        else:
+            await self.toggle()
 
     async def ticker(self):
         """Час і смужка; сховати панель за 4 с; позиція в історію — раз на 10 с."""
@@ -153,10 +173,7 @@ class Player:
             if self.overlay.opacity == 1:
                 self.time_text.value = f"{fmt_time(pos)} / {fmt_time(dur)}" if dur else fmt_time(pos)
                 self.bar.value = pos / dur if dur else 0
-                icon = ft.Icons.PAUSE_ROUNDED if playing else ft.Icons.PLAY_ARROW_ROUNDED
-                if self.play_btn.content.icon != icon:
-                    self.play_btn.content.icon = icon
-                    self.play_btn.update()
+                self.set_play_icon(playing)
                 self.time_text.update()
                 self.bar.update()
                 if playing and time.monotonic() - self.shown_at > 4:
@@ -188,10 +205,22 @@ class Player:
             except Exception:
                 pass
 
+    def set_play_icon(self, playing):
+        icon = ft.Icons.PAUSE_ROUNDED if playing else ft.Icons.PLAY_ARROW_ROUNDED
+        if self.play_btn.content.icon != icon:
+            self.play_btn.content.icon = icon
+            self.center_icon.content.icon = icon
+            self.play_btn.update()
+            self.center_icon.update()
+
     # ── керування
     async def toggle(self):
         await self.video.play_or_pause()
         self.show_overlay(False)
+        try:
+            self.set_play_icon(await self.video.is_playing())
+        except Exception:
+            pass
 
     async def seek_by(self, seconds):
         try:

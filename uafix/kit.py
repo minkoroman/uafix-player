@@ -56,8 +56,9 @@ def plate(content, on_click=None, kind="plain", pad=(18, 14), radius=3, autofocu
             padding=ft.Padding.symmetric(horizontal=pad[0], vertical=pad[1])))
 
 
-def label(text, icon=None, size=T.S_SMALL, weight=ft.FontWeight.W_700):
+def label(text, icon=None, size=None, weight=ft.FontWeight.W_700):
     """Напис для плашки: великі літери, колір — від плашки."""
+    size = size or T.S_SMALL
     parts = [ft.Icon(icon, size=size + 6)] if icon else []
     parts.append(ft.Text(text.upper(), size=size, weight=weight,
                          style=ft.TextStyle(letter_spacing=size * 0.1)))
@@ -201,13 +202,21 @@ def board_row(cells, on_click=None, last=False, autofocus=False, height=None, tr
     for value, share, kind in cells:
         color = {"main": T.LETTER, "dim": T.BOARD_DIM, "signal": T.BOARD_SIGNAL}[kind]
         size = size_main if kind == "main" else T.S_SMALL
-        t = ft.Text((value or "").upper(), size=size, color=color, max_lines=1,
+        t = ft.Text((value or "").upper(), size=size, color=color,
+                    max_lines=2 if (T.MOBILE and kind == "main") else 1,
                     weight=ft.FontWeight.W_800 if kind == "main" else ft.FontWeight.W_700,
                     overflow=ft.TextOverflow.ELLIPSIS,
-                    style=ft.TextStyle(letter_spacing=size * (0.05 if kind == "main" else 0.08)))
+                    style=ft.TextStyle(letter_spacing=size * (0.04 if kind == "main" else 0.06)))
         texts.append((t, color))
         row_cells.append(ft.Container(t, expand=share or 1))
-    body = ft.Row(row_cells, spacing=18, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+    if T.MOBILE:
+        # телефон: назва — першим рядком, решта (серія, скільки лишилось) — під нею
+        extra = [c.content for c in row_cells[1:] if c.content.value]
+        body = ft.Column([row_cells[0].content,
+                          ft.Row(extra, spacing=12, wrap=True, run_spacing=2)],
+                         spacing=4, tight=True)
+    else:
+        body = ft.Row(row_cells, spacing=18, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
     def lit(on):
         for t, c in texts:
@@ -215,7 +224,8 @@ def board_row(cells, on_click=None, last=False, autofocus=False, height=None, tr
             t.update()
 
     btn = ft.Button(
-        content=ft.Container(body, height=height or (72 if T.TV else 56),
+        content=ft.Container(body, height=None if T.MOBILE else (height or (72 if T.TV else 56)),
+                             padding=ft.Padding.symmetric(vertical=12) if T.MOBILE else None,
                              alignment=ft.Alignment.CENTER_LEFT),
         on_click=_click(on_click), autofocus=autofocus, expand=True,
         on_focus=lambda e: (quiet(), lit(True)), on_blur=lambda e: (quiet(), lit(False)),
@@ -224,7 +234,7 @@ def board_row(cells, on_click=None, last=False, autofocus=False, height=None, tr
             bgcolor={CTRL.FOCUSED: T.LETTER, CTRL.HOVERED: T.LETTER, CTRL.DEFAULT: T.BOARD},
             elevation=0, overlay_color=ft.Colors.TRANSPARENT, shadow_color=ft.Colors.TRANSPARENT,
             shape=ft.RoundedRectangleBorder(radius=0), animation_duration=0,
-            padding=ft.Padding.symmetric(horizontal=24, vertical=0)))
+            padding=ft.Padding.symmetric(horizontal=16 if T.MOBILE else 24, vertical=0)))
     row = ft.Container(
         ft.Row([btn] + ([trailing] if trailing else []), spacing=0,
                vertical_alignment=ft.CrossAxisAlignment.CENTER),

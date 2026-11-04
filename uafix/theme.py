@@ -50,13 +50,19 @@ else:
 
 STAR = "#E8B04B"
 
-# розміри: TV — читати з 2–3 м; телефон — компактно
-if TV:
-    S_BOARD, S_TITLE, S_HEAD, S_BODY, S_SMALL, S_KICK = 26, 44, 19, 19, 16, 14
-elif os.environ.get("UAFIX_MOBILE") == "1":
-    S_BOARD, S_TITLE, S_HEAD, S_BODY, S_SMALL, S_KICK = 15, 28, 15, 15, 12, 11
-else:
-    S_BOARD, S_TITLE, S_HEAD, S_BODY, S_SMALL, S_KICK = 20, 40, 16, 15, 13, 12
+# розміри: TV — читати з 2–3 м; телефон — компактно (configure — на старті, коли вже
+# відомо, на чому працюємо)
+S_BOARD, S_TITLE, S_HEAD, S_BODY, S_SMALL, S_KICK = 20, 40, 16, 15, 13, 12
+MOBILE = False
+
+
+def configure(mobile):
+    global S_BOARD, S_TITLE, S_HEAD, S_BODY, S_SMALL, S_KICK, MOBILE
+    MOBILE = mobile
+    if TV:
+        S_BOARD, S_TITLE, S_HEAD, S_BODY, S_SMALL, S_KICK = 26, 44, 19, 19, 16, 14
+    elif mobile:
+        S_BOARD, S_TITLE, S_HEAD, S_BODY, S_SMALL, S_KICK = 16, 28, 15, 15, 13, 11
 
 FAST = ft.Animation(140, ft.AnimationCurve.EASE_OUT)
 
@@ -67,6 +73,12 @@ def theme():
         color_scheme_seed=SIGNAL,
         color_scheme=ft.ColorScheme(primary=SIGNAL, surface=FACADE, on_surface=INK,
                                     on_surface_variant=DIM, surface_tint=ft.Colors.TRANSPARENT),
+        navigation_bar_theme=ft.NavigationBarTheme(
+            bgcolor=WALL, indicator_color=BOARD, height=68,
+            label_text_style={ft.ControlState.SELECTED: ft.TextStyle(
+                                  color=INK, size=12, weight=ft.FontWeight.W_800),
+                              ft.ControlState.DEFAULT: ft.TextStyle(
+                                  color=INK, size=12, weight=ft.FontWeight.W_600)}),
         scrollbar_theme=ft.ScrollbarTheme(thumb_color=ft.Colors.with_opacity(0.25, INK),
                                           thickness=5, radius=0),
         page_transitions=ft.PageTransitionsTheme(
@@ -77,11 +89,13 @@ def theme():
     )
 
 
-def caps(text, size=S_HEAD, color=None, weight=ft.FontWeight.W_800, spacing=0.08, **kw):
+def caps(text, size=None, color=None, weight=ft.FontWeight.W_800, spacing=0.08, **kw):
     """Напис табло: великі літери, розріджено."""
+    size = size or S_HEAD
     return ft.Text((text or "").upper(), size=size, weight=weight, color=color or INK,
                    style=ft.TextStyle(letter_spacing=size * spacing), **kw)
 
 
-def text(value, size=S_BODY, color=None, weight=ft.FontWeight.W_400, **kw):
+def text(value, size=None, color=None, weight=ft.FontWeight.W_400, **kw):
+    size = size or S_BODY
     return ft.Text(value, size=size, color=color or INK, weight=weight, **kw)

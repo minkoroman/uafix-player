@@ -69,8 +69,9 @@ class Home:
         rows = []
         for i, h in enumerate(items):
             item = {k: h.get(k, "") for k in ("url", "title", "orig", "poster", "age")}
-            if self.app.mobile:
-                cells = [(h.get("title"), 3, "main"), (left_text(h), 2, "signal")]
+            if self.app.mobile:  # телефон: назва, під нею серія й «лишилось»
+                cells = [(h.get("title"), 1, "main"), (ep_text(h), 1, "dim"),
+                         (left_text(h), 1, "signal")]
             else:
                 cells = [(h.get("title"), 7, "main"), (ep_text(h), 4, "dim"),
                          (left_text(h), 4, "signal"), (h.get("voice") or "", 3, "dim")]
