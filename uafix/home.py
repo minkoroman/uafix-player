@@ -154,7 +154,9 @@ class Home:
                           padding=ft.Padding.symmetric(horizontal=self.app.side - 6))
         more = kit.plate(kit.label("Усі"), on_click=lambda e: self.app.show(path, name),
                          pad=(14, 8)) if not self.app.tv else ft.Container()
-        head = ft.Container(ft.Row([T.caps(name, size=T.S_HEAD), ft.Container(expand=True), more],
+        head = ft.Container(ft.Row([T.caps(name, size=T.S_HEAD)], alignment=ft.MainAxisAlignment.CENTER)
+                            if self.app.tv else  # ТВ: назва ряду по центру
+                            ft.Row([T.caps(name, size=T.S_HEAD), ft.Container(expand=True), more],
                                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
                             padding=ft.Padding.only(left=self.app.side, right=self.app.side,
                                                     top=34, bottom=6))
