@@ -89,9 +89,29 @@ class Grid:
     MIN_ITEMS = 36
 
     def near_end(self, n):
-        """Фокус пульта дійшов до останніх двох рядів — наступна сторінка, не чекаючи прокрутки."""
+        """Фокус пульта: перший ряд — докрутити до самого верху (видно назву розділу);
+        останні два ряди — наступна сторінка, не чекаючи прокрутки."""
+        if self.app.tv and n < self.per_row():
+            self._top_n = getattr(self, "_top_n", 0) + 1
+            self.app.page.run_task(self._to_top, self._top_n)
         if self.has_more and not self.busy and n >= len(self.grid.controls) - 16:
             self.next_page()
+
+    def per_row(self):
+        """Скільки карток уміщається в ряд (ширина вікна мінус меню й поля)."""
+        from .app import RAIL_TV_MIN
+        width = (self.app.page.width or 960) - (RAIL_TV_MIN if self.app.tv else 0) \
+            - 2 * (self.app.side - 6)
+        return max(1, int((width + 4) // (self.card_w + 6 + 8 + 4)))
+
+    async def _to_top(self, n):
+        await asyncio.sleep(0.12)  # після власного автоскролу Flutter (той лише «підтягує» картку)
+        if n != self._top_n:
+            return
+        try:
+            await self.body.scroll_to(offset=0, duration=160)
+        except Exception:
+            pass
 
 
 # тематичні добірки розділу — їх немає серед жанрів фільтра сайту (окремі сторінки)
@@ -314,7 +334,8 @@ class Favorites(Grid):
         for i, it in enumerate(favs):
             card = kit.poster_card(self.app.page, it, self.app.open_title, self.card_w,
                                    meta=self.app.store.settings.get("card_meta", True),
-                                   autofocus=self.app.tv and i == 0)
+                                   autofocus=self.app.tv and i == 0,
+                                   on_focus=lambda f, i=i: f and self.near_end(i))
             self.grid.controls.append(card)
         try:
             self.body.update()
@@ -336,7 +357,8 @@ class History(Grid):
             it = {k: h.get(k, "") for k in ("url", "title", "orig", "poster", "age")}
             card = kit.poster_card(self.app.page, it, self.app.open_title, self.card_w,
                                    meta=self.app.store.settings.get("card_meta", True),
-                                   autofocus=self.app.tv and i == 0)
+                                   autofocus=self.app.tv and i == 0,
+                                   on_focus=lambda f, i=i: f and self.near_end(i))
             self.grid.controls.append(card)
         try:
             self.body.update()
