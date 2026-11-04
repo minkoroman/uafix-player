@@ -173,6 +173,7 @@ def main(page: ft.Page, reopen=None):
     gen, first = RUN["gen"], reopen is None
     page.title = "UAFix Player"
     page.theme_mode = ft.ThemeMode.LIGHT if ui.LIGHT else ft.ThemeMode.DARK
+    page.fonts = {ui.FONT: "fonts/GolosText.ttf"}
     page.theme = page.dark_theme = ui.theme()
     if TV:
         # підсвітка фокуса там, де її малює сам Flutter (бокове меню): контрастна до теми
@@ -580,7 +581,7 @@ def main(page: ft.Page, reopen=None):
 
         # кнопки — власним блоком: стандартний ряд дії на вузькому екрані розсипався стовпчиком
         show_dialog(ft.AlertDialog(
-            title=ft.Text(f"Доступна версія {rel['version']}", weight=ft.FontWeight.W_800),
+            title=ft.Text(f"Доступна версія {rel['version']}", weight=ft.FontWeight.W_700),
             bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18), scrollable=True,
             content=ft.Column([
                 ft.Text(f"У вас версія {updater.VERSION}. Що нового:", color=MUTED, size=13),
@@ -629,7 +630,7 @@ def main(page: ft.Page, reopen=None):
                              border_radius=3, width=dialog_width())
         label = ft.Text("Підключаюсь…", color=MUTED, size=13)
         dlg = ft.AlertDialog(
-            title=ft.Text(f"Завантаження версії {version}", weight=ft.FontWeight.W_800),
+            title=ft.Text(f"Завантаження версії {version}", weight=ft.FontWeight.W_700),
             bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
             content=ft.Column([label, bar,
                                ft.Text("Можна сховати це вікно — завантаження триватиме у фоні.",
@@ -677,7 +678,7 @@ def main(page: ft.Page, reopen=None):
         # вікно на випадок, якщо Android спершу попросить дозволити встановлення програм:
         # після дозволу достатньо повернутись і натиснути «Встановити»
         show_dialog(ft.AlertDialog(
-            title=ft.Text(f"Версія {version} завантажена", weight=ft.FontWeight.W_800),
+            title=ft.Text(f"Версія {version} завантажена", weight=ft.FontWeight.W_700),
             bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
             content=ft.Text("Натисніть «Встановити». Якщо Android попросить дозволити встановлення "
                             "з цього джерела — дозвольте, поверніться сюди й натисніть ще раз.",
@@ -696,7 +697,7 @@ def main(page: ft.Page, reopen=None):
     async def install_desktop_update(zip_path, version, url):
         """Mac / Windows: розпакувати й перезапустити застосунок уже новою версією."""
         show_dialog(ft.AlertDialog(
-            modal=True, title=ft.Text(f"Встановлюю версію {version}", weight=ft.FontWeight.W_800),
+            modal=True, title=ft.Text(f"Встановлюю версію {version}", weight=ft.FontWeight.W_700),
             bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
             content=ft.Row([ft.ProgressRing(width=20, height=20, stroke_width=2, color=ACCENT),
                             ft.Text("Застосунок закриється й відкриється знову вже оновленим.",
@@ -756,7 +757,7 @@ def main(page: ft.Page, reopen=None):
                 toast("Не вдалося завантажити список змін", ft.Icons.ERROR_OUTLINE_ROUNDED)
             return
         show_dialog(ft.AlertDialog(
-            title=ft.Text(f"Що нового у версії {updater.VERSION}", weight=ft.FontWeight.W_800),
+            title=ft.Text(f"Що нового у версії {updater.VERSION}", weight=ft.FontWeight.W_700),
             bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18), scrollable=True,
             content=notes_view(notes),
             actions=[ft.FilledButton("Чудово", autofocus=TV, on_click=lambda e: page.pop_dialog(),
@@ -1205,7 +1206,7 @@ def main(page: ft.Page, reopen=None):
     drawer_controls = [
         ft.Container(
             # без іконки: її тепер можна вибрати, а тут завжди була б класична
-            ft.Column([ft.Text("UAFix", size=18, weight=ft.FontWeight.W_800, color=TEXT),
+            ft.Column([ft.Text("UAFix", size=18, weight=ft.FontWeight.W_700, color=TEXT),
                        ft.Text("Фільми та серіали українською", size=11, color=MUTED)],
                       spacing=0),
             padding=ft.Padding.only(left=24, right=16, top=40 if is_mac else 20, bottom=12),
@@ -1516,7 +1517,7 @@ def main(page: ft.Page, reopen=None):
                         for n, g, on in collection_items()]
         many = len(buttons) > 7
         show_dialog(ft.AlertDialog(
-            title=ft.Text(d["title"], size=20, weight=ft.FontWeight.W_800, color=TEXT),
+            title=ft.Text(d["title"], size=20, weight=ft.FontWeight.W_700, color=TEXT),
             bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
             content=ft.Column(buttons, spacing=8, tight=True,
                               scroll=ft.ScrollMode.AUTO if many else None,
@@ -1582,7 +1583,7 @@ def main(page: ft.Page, reopen=None):
         switch_in_curve=ui.EASE, switch_out_curve=ui.EASE)
 
     def set_heading(text):
-        heading_switcher.content = ft.Text(text, size=22, weight=ft.FontWeight.W_800, color=TEXT,
+        heading_switcher.content = ft.Text(text, size=22, weight=ft.FontWeight.W_700, color=TEXT,
                                            key=text, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
 
     set_heading("Головна")
@@ -1851,7 +1852,7 @@ def main(page: ft.Page, reopen=None):
             field.on_focus = lambda e: (quiet(), st.update(tv_search_field=True))
             field.on_blur = lambda e: (quiet(), st.update(tv_search_field=False))
             show_dialog(ft.AlertDialog(
-                title=ft.Text("Пошук", size=24, weight=ft.FontWeight.W_800),
+                title=ft.Text("Пошук", size=24, weight=ft.FontWeight.W_700),
                 bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
                 content=ft.Column([field] + ([ft.Text("Нещодавні", color=MUTED, size=16),
                                               ft.Row(tv_recent, wrap=True, spacing=10,
@@ -1987,19 +1988,18 @@ def main(page: ft.Page, reopen=None):
 
     def rating_badge(rating):
         return ft.Container(
-            ft.Row([ft.Icon(ft.Icons.STAR_ROUNDED, size=12, color="#F5C518"),
-                    ft.Text(f"{rating:.1f}", size=11, weight=ft.FontWeight.W_700,
+            ft.Row([ft.Icon(ft.Icons.STAR_ROUNDED, size=12, color=ui.GOLD),
+                    ft.Text(f"{rating:.1f}", size=12, weight=ft.FontWeight.W_600,
                             color="#FFFFFF")], spacing=3, tight=True),
             padding=ft.Padding.symmetric(horizontal=7, vertical=3), border_radius=6,
-            bgcolor=ft.Colors.with_opacity(0.6, "#000000"), border=ft.Border.all(1, "#22FFFFFF"))
+            bgcolor=ft.Colors.with_opacity(0.72, "#000000"))
 
     def grid_card(item, progress=None, caption=None, on_open=None, on_remove=None, tv_w=None):
         play = ft.Container(
-            ft.Icon(ft.Icons.PLAY_ARROW_ROUNDED, color="#FFFFFF", size=30),
-            width=56, height=56, border_radius=28, gradient=ui.ACCENT_GRADIENT,
-            alignment=ft.Alignment.CENTER, opacity=0, scale=0.7,
-            animate_opacity=ui.FAST, animate_scale=ui.MED,
-            shadow=ft.BoxShadow(blur_radius=24, color=ft.Colors.with_opacity(0.5, ACCENT)),
+            ft.Icon(ft.Icons.PLAY_ARROW_ROUNDED, color="#0B0B0D", size=30),
+            width=56, height=56, border_radius=28, bgcolor=ft.Colors.with_opacity(0.92, "#FFFFFF"),
+            alignment=ft.Alignment.CENTER, opacity=0, scale=0.85,
+            animate_opacity=ui.FAST, animate_scale=ui.FAST,
         )
         layers = [
             tmdb_swap(ui.poster_image(item["poster"], cache_width=480 if TV else 760,
@@ -2064,13 +2064,13 @@ def main(page: ft.Page, reopen=None):
         card = ft.Container(
             ft.Stack(layers, expand=True),
             # з «save layer» кути обрізаються чисто (без ореолу тіні біля рамки); на TV — простіше
-            border_radius=14, clip_behavior=ft.ClipBehavior.ANTI_ALIAS if TV
+            border_radius=12, clip_behavior=ft.ClipBehavior.ANTI_ALIAS if TV
             else ft.ClipBehavior.ANTI_ALIAS_WITH_SAVE_LAYER,
             # без рамки (крім TV): світла лінія на темних постерах виглядала як «скляний»
             # обідок
             border=ft.Border.all(1, BORDER) if TV else None,
-            shadow=ft.BoxShadow(blur_radius=18, offset=ft.Offset(0, 8),
-                                color=ft.Colors.with_opacity(0.35, "#000000")),
+            shadow=ft.BoxShadow(blur_radius=12, offset=ft.Offset(0, 6),
+                                color=ft.Colors.with_opacity(0.28, "#000000")),
             scale=1, animate_scale=ui.MED, animate=ui.MED,
             on_click=lambda e: on_open() if on_open else page.run_task(open_title, item),
         )
@@ -2079,9 +2079,9 @@ def main(page: ft.Page, reopen=None):
             card.scale = 1.045 if h else 1
             # на ПК без рамки й під мишею: наведення видно зі збільшення, тіні й кнопки ▶
             card.shadow = ft.BoxShadow(
-                blur_radius=34 if h else 18, offset=ft.Offset(0, 14 if h else 8),
-                color=ft.Colors.with_opacity(0.5 if h else 0.35, "#000000"))
-            play.opacity, play.scale = (1, 1) if h else (0, 0.7)
+                blur_radius=28 if h else 12, offset=ft.Offset(0, 12 if h else 6),
+                color=ft.Colors.with_opacity(0.45 if h else 0.28, "#000000"))
+            play.opacity, play.scale = (1, 1) if h else (0, 0.85)
             if remove_btn is not None and not is_mobile:
                 remove_btn.opacity = 1 if h else 0
             card.update()
@@ -2096,11 +2096,12 @@ def main(page: ft.Page, reopen=None):
             ring_pad = 6  # 3 рамка + 3 зазор
             w = (tv_w or TV_CARD_W) - 2 * ring_pad
             card.width, card.height = w, w / POSTER_RATIO
-            outer = ft.Container(card, padding=3, border_radius=20,
+            outer = ft.Container(card, padding=3, border_radius=18, scale=1,
                                  border=ft.Border.all(3, ft.Colors.TRANSPARENT))
 
             def ring(f):
                 outer.border = ft.Border.all(3, focus_ring if f else ft.Colors.TRANSPARENT)
+                outer.scale = 1.04 if f else 1
                 outer.update()
 
             btn = ui.appear(focusable(
@@ -2559,22 +2560,24 @@ def main(page: ft.Page, reopen=None):
         primary = ft.ButtonStyle(
             side=focus_side,
             bgcolor={ft.ControlState.HOVERED: "#FFFFFF", ft.ControlState.DEFAULT: "#ECECEC"},
-            color="#0D0E12", icon_color="#0D0E12", shape=ft.RoundedRectangleBorder(radius=12),
+            color="#0B0B0D", icon_color="#0B0B0D", shape=ft.StadiumBorder(),
             padding=ft.Padding.symmetric(horizontal=26, vertical=18),
-            text_style=ft.TextStyle(size=15, weight=ft.FontWeight.W_700))
+            text_style=ft.TextStyle(size=15, weight=ft.FontWeight.W_600))
         secondary = ft.ButtonStyle(
             side=focus_side,
             bgcolor={ft.ControlState.HOVERED: ft.Colors.with_opacity(0.35, "#FFFFFF"),
                      ft.ControlState.DEFAULT: ft.Colors.with_opacity(0.2, "#FFFFFF")},
-            color="#FFFFFF", icon_color="#FFFFFF", shape=ft.RoundedRectangleBorder(radius=12),
+            color="#FFFFFF", icon_color="#FFFFFF", shape=ft.StadiumBorder(),
             padding=ft.Padding.symmetric(horizontal=22, vertical=18),
             text_style=ft.TextStyle(size=15, weight=ft.FontWeight.W_600))
         return ft.Column([
             ft.Text(("Новинка · " + kind if kind else "Новинка").upper(), size=12,
-                    weight=ft.FontWeight.W_800, color=ACCENT),
-            ft.Text(info.get("title") or item["title"], size=30 if is_mobile else 54,
-                    weight=ft.FontWeight.W_800, color="#FFFFFF", max_lines=2,
-                    overflow=ft.TextOverflow.ELLIPSIS),
+                    weight=ft.FontWeight.W_700, color=ACCENT,
+                    style=ft.TextStyle(letter_spacing=1.2)),
+            ft.Text(info.get("title") or item["title"], size=30 if is_mobile else 46,
+                    weight=ft.FontWeight.W_700, color="#FFFFFF", max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                    style=ft.TextStyle(height=1.05, letter_spacing=-0.5)),
             ft.Text(orig, size=16, color="#C9CDD4", visible=bool(orig)),
             ft.Row(meta + ([ft.Text(genres, size=13, color="#C9CDD4")] if genres else []),
                    spacing=8, wrap=True, vertical_alignment=ft.CrossAxisAlignment.CENTER),
@@ -2734,7 +2737,7 @@ def main(page: ft.Page, reopen=None):
                 pass
 
         header = ft.Row([
-            ft.Text(name, size=20 if is_mobile else 22, weight=ft.FontWeight.W_800, color=TEXT),
+            ft.Text(name, size=20 if is_mobile else 22, weight=ft.FontWeight.W_700, color=TEXT),
             ft.Container(expand=True),
             ft.TextButton("Усі", icon=ft.Icons.CHEVRON_RIGHT_ROUNDED, visible=not TV,
                           style=ft.ButtonStyle(color=MUTED, icon_color=MUTED),
@@ -2764,7 +2767,7 @@ def main(page: ft.Page, reopen=None):
     continue_section = ft.Column([
         ft.Container(ft.Row([
             ft.Text("Продовжити перегляд", size=20 if is_mobile else 22,
-                    weight=ft.FontWeight.W_800, color=TEXT),
+                    weight=ft.FontWeight.W_700, color=TEXT),
         ]), padding=ft.Padding.symmetric(horizontal=side)),
         ft.Container(continue_list, padding=ft.Padding.only(left=side, right=side, top=12))
         if TV else continue_row,
@@ -2899,7 +2902,7 @@ def main(page: ft.Page, reopen=None):
             if not blocks:
                 tv_first_tile.append(tiles[0])
             blocks.append(ft.Column([
-                ft.Text(group, size=22, weight=ft.FontWeight.W_800, color=TEXT),
+                ft.Text(group, size=22, weight=ft.FontWeight.W_700, color=TEXT),
                 ft.ResponsiveRow(tiles, spacing=16, run_spacing=16),
             ], spacing=12))
         return ft.Container(ft.Column(blocks, spacing=28),
@@ -2911,7 +2914,7 @@ def main(page: ft.Page, reopen=None):
         padding=ft.Padding.symmetric(horizontal=side, vertical=14))
     fav_new_section = ft.Column([
         ft.Container(ft.Text("Нові серії в обраному", size=20 if is_mobile else 22,
-                             weight=ft.FontWeight.W_800, color=TEXT),
+                             weight=ft.FontWeight.W_700, color=TEXT),
                      padding=ft.Padding.symmetric(horizontal=side)),
         ft.Container(fav_new_box, padding=ft.Padding.only(left=side, right=side, top=12))
         if TV else fav_new_box,
@@ -3197,7 +3200,7 @@ def main(page: ft.Page, reopen=None):
                              ft.Container(body, on_click=lambda e, k=key: pick(k),
                                           border_radius=24, ink=True, padding=4))
             show_dialog(ft.AlertDialog(
-                title=ft.Text("Іконка застосунку", size=20, weight=ft.FontWeight.W_800,
+                title=ft.Text("Іконка застосунку", size=20, weight=ft.FontWeight.W_700,
                               color=TEXT),
                 bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
                 content=ft.Column([ft.Row(tiles, wrap=True, spacing=14, run_spacing=14,
@@ -3274,7 +3277,7 @@ def main(page: ft.Page, reopen=None):
                                    style=ft.ButtonStyle(bgcolor=ACCENT, color="#FFFFFF",
                                                         icon_color="#FFFFFF"))
         dlg = ft.AlertDialog(
-            title=ft.Text("Повідомити про проблему", weight=ft.FontWeight.W_800,
+            title=ft.Text("Повідомити про проблему", weight=ft.FontWeight.W_700,
                           size=20 if is_mobile else 24),
             bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18), scrollable=True,
             content=ft.Column([
@@ -3362,7 +3365,7 @@ def main(page: ft.Page, reopen=None):
                 return handler
 
             show_dialog(ft.AlertDialog(
-                title=ft.Text(title, size=22, weight=ft.FontWeight.W_800, color=TEXT),
+                title=ft.Text(title, size=22, weight=ft.FontWeight.W_700, color=TEXT),
                 bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
                 content=ft.Column([
                     ft.FilledButton(
@@ -3458,7 +3461,7 @@ def main(page: ft.Page, reopen=None):
                 refresh_history_info()
                 history_info.update()
             show_dialog(ft.AlertDialog(
-                title=ft.Text("Очистити історію?", weight=ft.FontWeight.W_800),
+                title=ft.Text("Очистити історію?", weight=ft.FontWeight.W_700),
                 bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
                 content=ft.Text("Зникне поличка «Продовжити перегляд» і збережені позиції "
                                 "у фільмах та серіалах.", color=TEXT, width=dialog_width()),
@@ -3516,11 +3519,11 @@ def main(page: ft.Page, reopen=None):
 
         def sync_show_code():
             show_dialog(ft.AlertDialog(
-                title=ft.Text("Код синхронізації", weight=ft.FontWeight.W_800),
+                title=ft.Text("Код синхронізації", weight=ft.FontWeight.W_700),
                 bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
                 content=ft.Column([
                     ft.Container(ft.Text(sync.pretty(settings["sync_code"]), size=34,
-                                         weight=ft.FontWeight.W_800, color=ACCENT,
+                                         weight=ft.FontWeight.W_700, color=ACCENT,
                                          selectable=True, font_family="monospace"),
                                  alignment=ft.Alignment.CENTER, padding=10),
                     ft.Text("На іншому пристрої: Налаштування → Синхронізація → «Ввести код з "
@@ -3561,7 +3564,7 @@ def main(page: ft.Page, reopen=None):
                                  filled=True, fill_color=SURFACE_2, cursor_color=ACCENT,
                                  on_submit=submit, width=dialog_width())
             show_dialog(ft.AlertDialog(
-                title=ft.Text("Код з іншого пристрою", weight=ft.FontWeight.W_800),
+                title=ft.Text("Код з іншого пристрою", weight=ft.FontWeight.W_700),
                 bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
                 content=ft.Column([field, err], tight=True, spacing=8),
                 actions=[ft.TextButton("Скасувати", on_click=lambda e: page.pop_dialog(),
@@ -3578,7 +3581,7 @@ def main(page: ft.Page, reopen=None):
                 toast("Синхронізацію на цьому пристрої вимкнено", ft.Icons.CLOUD_OFF_ROUNDED)
 
             show_dialog(ft.AlertDialog(
-                title=ft.Text("Вимкнути синхронізацію?", weight=ft.FontWeight.W_800),
+                title=ft.Text("Вимкнути синхронізацію?", weight=ft.FontWeight.W_700),
                 bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
                 content=ft.Text("Цей пристрій перестане обмінюватися історією з іншими. "
                                 "Те, що вже є тут, залишиться.", color=TEXT, width=dialog_width()),
@@ -3722,7 +3725,7 @@ def main(page: ft.Page, reopen=None):
         bar = ft.Container(
             ft.Row([round_button(ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED, lambda e: go_back(),
                                  tooltip="Назад"),
-                    ft.Text(heading, size=20, weight=ft.FontWeight.W_800, color=TEXT,
+                    ft.Text(heading, size=20, weight=ft.FontWeight.W_700, color=TEXT,
                             expand=True), *win_buttons()],
                    spacing=14),
             height=58, padding=ft.Padding.only(left=14 + traffic_gap, right=8 if is_win else 14),
@@ -3840,7 +3843,7 @@ def main(page: ft.Page, reopen=None):
             head = ft.Row([
                 ft.Image(src=src, width=84, height=112, fit=ft.BoxFit.COVER, border_radius=10)
                 if src else ft.Container(),
-                ft.Text(name, size=20, weight=ft.FontWeight.W_800, color=TEXT, expand=True)],
+                ft.Text(name, size=20, weight=ft.FontWeight.W_700, color=TEXT, expand=True)],
                 spacing=14, vertical_alignment=ft.CrossAxisAlignment.CENTER)
             body = ft.Column([head, ft.Text(bio, size=13, color=MUTED), hint, works],
                              spacing=12, tight=True, scroll=ft.ScrollMode.AUTO,
@@ -3848,7 +3851,7 @@ def main(page: ft.Page, reopen=None):
         else:
             photo = (ft.Image(src=src, width=110, height=150, fit=ft.BoxFit.COVER,
                               border_radius=12) if src else ft.Container())
-            text = ft.Column([ft.Text(name, size=20, weight=ft.FontWeight.W_800, color=TEXT),
+            text = ft.Column([ft.Text(name, size=20, weight=ft.FontWeight.W_700, color=TEXT),
                               ft.Text(bio, size=13, color=MUTED)],
                              spacing=6, scroll=ft.ScrollMode.AUTO, height=170, expand=True)
             body = ft.Column([
@@ -3919,7 +3922,7 @@ def main(page: ft.Page, reopen=None):
             staff = "адмін" in c["role"].lower()
             head = ft.Row([
                 ft.Container(ft.Text((c["author"][:1] or "?").upper(), size=14,
-                                     weight=ft.FontWeight.W_800, color="#FFFFFF"),
+                                     weight=ft.FontWeight.W_700, color="#FFFFFF"),
                              width=32, height=32, border_radius=16,
                              bgcolor=ACCENT if staff else SURFACE_3,
                              alignment=ft.Alignment.CENTER),
@@ -3959,7 +3962,7 @@ def main(page: ft.Page, reopen=None):
         layers = [
             ui.poster_image(src, radius=10, aspect_ratio=2 / 3),
             ft.Container(
-                ft.Text(str(num), size=13, weight=ft.FontWeight.W_800, color="#FFFFFF"),
+                ft.Text(str(num), size=13, weight=ft.FontWeight.W_700, color="#FFFFFF"),
                 bgcolor=ACCENT if current else ft.Colors.with_opacity(0.75, "#000000"),
                 border_radius=8, padding=ft.Padding.symmetric(horizontal=8, vertical=3),
                 left=6, top=6),
@@ -4065,7 +4068,7 @@ def main(page: ft.Page, reopen=None):
                                 color=ft.Colors.with_opacity(0.6, "#000000")),
             scale=0.92, animate_scale=ui.SLOW,
         )
-        title = ft.Text(item["title"], size=26 if is_mobile else 36, weight=ft.FontWeight.W_800,
+        title = ft.Text(item["title"], size=26 if is_mobile else 36, weight=ft.FontWeight.W_700,
                         color=TEXT)
         orig = ft.Text(item["orig"], size=16, color=MUTED, visible=bool(item["orig"]))
         meta_row = ft.Row([ui.pill(item["age"])] if item["age"] else [], spacing=8, wrap=True)
@@ -4096,30 +4099,28 @@ def main(page: ft.Page, reopen=None):
         # поки шукаємо відео (буває довго) — на кнопці видно, що треба зачекати
         # головна дія — оранжева: «Дивитись», якщо ще не дивились, інакше «Продовжити»
         # (тоді «Дивитись» — біла)
-        def orange_style(pad=26):
+        def orange_style(pad=26):  # головна дія: біла (як Apple TV / Google TV)
             return ft.ButtonStyle(
-                bgcolor={ft.ControlState.DISABLED: SURFACE_3, ft.ControlState.DEFAULT: ACCENT},
-                color={ft.ControlState.DISABLED: MUTED, ft.ControlState.DEFAULT: "#FFFFFF"},
-                icon_color={ft.ControlState.DISABLED: MUTED, ft.ControlState.DEFAULT: "#FFFFFF"},
-                shape=ft.RoundedRectangleBorder(radius=12),
+                bgcolor={ft.ControlState.DISABLED: SURFACE_3, ft.ControlState.DEFAULT: ui.PRIMARY_BG},
+                color={ft.ControlState.DISABLED: MUTED, ft.ControlState.DEFAULT: ui.PRIMARY_FG},
+                icon_color={ft.ControlState.DISABLED: MUTED, ft.ControlState.DEFAULT: ui.PRIMARY_FG},
+                shape=ft.StadiumBorder(),
                 padding=ft.Padding.symmetric(horizontal=pad, vertical=18),
-                text_style=ft.TextStyle(size=15, weight=ft.FontWeight.W_700),
-                elevation={ft.ControlState.HOVERED: 10, ft.ControlState.DEFAULT: 0},
-                shadow_color=ACCENT,
-                side={ft.ControlState.FOCUSED: ft.BorderSide(3, "#FFFFFF"),
-                      ft.ControlState.DEFAULT: ft.BorderSide(0, ft.Colors.TRANSPARENT)})
-
-        def white_style(pad=22):
-            return ft.ButtonStyle(
-                bgcolor={ft.ControlState.DISABLED: SURFACE_3, ft.ControlState.HOVERED: "#FFFFFF",
-                         ft.ControlState.DEFAULT: "#ECECEC"},
-                color={ft.ControlState.DISABLED: MUTED, ft.ControlState.DEFAULT: "#0D0E12"},
-                icon_color={ft.ControlState.DISABLED: MUTED, ft.ControlState.DEFAULT: "#0D0E12"},
-                shape=ft.RoundedRectangleBorder(radius=12),
-                padding=ft.Padding.symmetric(horizontal=pad, vertical=18),
-                text_style=ft.TextStyle(size=15, weight=ft.FontWeight.W_700),
+                text_style=ft.TextStyle(size=15, weight=ft.FontWeight.W_600),
                 side={ft.ControlState.FOCUSED: ft.BorderSide(3, ACCENT),
                       ft.ControlState.DEFAULT: ft.BorderSide(0, ft.Colors.TRANSPARENT)})
+
+        def white_style(pad=22):  # друга дія поруч з головною: тональна
+            return ft.ButtonStyle(
+                bgcolor={ft.ControlState.DISABLED: SURFACE_3, ft.ControlState.HOVERED: SURFACE_3,
+                         ft.ControlState.FOCUSED: SURFACE_3, ft.ControlState.DEFAULT: SURFACE_2},
+                color={ft.ControlState.DISABLED: MUTED, ft.ControlState.DEFAULT: TEXT},
+                icon_color={ft.ControlState.DISABLED: MUTED, ft.ControlState.DEFAULT: TEXT},
+                shape=ft.StadiumBorder(),
+                padding=ft.Padding.symmetric(horizontal=pad, vertical=18),
+                text_style=ft.TextStyle(size=15, weight=ft.FontWeight.W_600),
+                side={ft.ControlState.FOCUSED: ft.BorderSide(3, ACCENT),
+                      ft.ControlState.DEFAULT: ft.BorderSide(1, BORDER)})
 
         play_btn = ft.FilledButton(
             ft.Row([ft.ProgressRing(width=16, height=16, stroke_width=2, color=MUTED),
@@ -4132,7 +4133,7 @@ def main(page: ft.Page, reopen=None):
             bgcolor={ft.ControlState.HOVERED: SURFACE_3, ft.ControlState.FOCUSED: SURFACE_3,
                      ft.ControlState.DEFAULT: SURFACE_2},
             side={ft.ControlState.FOCUSED: ft.BorderSide(3, ACCENT),
-                  ft.ControlState.DEFAULT: ft.BorderSide(1, BORDER)}, shape=ft.RoundedRectangleBorder(radius=12),
+                  ft.ControlState.DEFAULT: ft.BorderSide(1, BORDER)}, shape=ft.StadiumBorder(),
             padding=ft.Padding.symmetric(horizontal=18, vertical=18),
         )
         resume_btn = ft.FilledButton(
@@ -4245,7 +4246,7 @@ def main(page: ft.Page, reopen=None):
         # «Серії» з'являються лише для серіалу (для фільму досить кнопки «Дивитись»,
         # на якій і так видно «Зачекайте, шукаю відео…»)
         episodes_section = ui.appear(ft.Column([
-            ft.Row([ft.Text("Серії", size=22, weight=ft.FontWeight.W_800, color=TEXT),
+            ft.Row([ft.Text("Серії", size=22, weight=ft.FontWeight.W_700, color=TEXT),
                     ft.Container(expand=True), ep_status], spacing=12),
             ft.Row([ep_progress]),
             seasons_row,
@@ -4255,7 +4256,7 @@ def main(page: ft.Page, reopen=None):
         ctx.update(seasons_row=seasons_row, episodes_box=episodes_box)
 
         # ── франшиза (TMDB): усі частини по порядку виходу — з'являється, якщо знайдеться
-        saga_title = ft.Text("", size=22 if is_mobile else 20, weight=ft.FontWeight.W_800,
+        saga_title = ft.Text("", size=22 if is_mobile else 20, weight=ft.FontWeight.W_700,
                              color=TEXT)
         # сітка по 3 в ряд (ширина — як у постера над нею; на телефоні — на всю ширину)
         saga_row = ft.ResponsiveRow([], columns=12, spacing=12, run_spacing=16,
@@ -4268,7 +4269,7 @@ def main(page: ft.Page, reopen=None):
         ], spacing=6, visible=False))
 
         # ── відгуки глядачів (коментарі з сайту)
-        reviews_title = ft.Text("Відгуки глядачів", size=22, weight=ft.FontWeight.W_800,
+        reviews_title = ft.Text("Відгуки глядачів", size=22, weight=ft.FontWeight.W_700,
                                 color=TEXT)
         reviews_list = ft.Column([], spacing=10)
         reviews_section = ui.appear(ft.Column([reviews_title, ft.Container(height=2),
@@ -4354,12 +4355,10 @@ def main(page: ft.Page, reopen=None):
                                 icon_color=ui.GOLD, bold=True))
         meta += [ui.pill(info[k]) for k in ("year", "duration", "age", "country") if info[k]]
         meta_row.controls = meta
-        genres_row.controls = [
-            ft.Container(ft.Text(g.capitalize(), size=12, color=ACCENT, weight=ft.FontWeight.W_600),
-                         padding=ft.Padding.symmetric(horizontal=10, vertical=4), border_radius=20,
-                         bgcolor=ft.Colors.with_opacity(0.1, ACCENT),
-                         border=ft.Border.all(1, ft.Colors.with_opacity(0.25, ACCENT)))
-            for g in info["genres"]]
+        # жанри — спокійним рядком через крапку (як Apple TV); оранжевий лише для вибраного
+        genres_row.controls = [ft.Text(" · ".join(g.capitalize() for g in info["genres"]),
+                                       size=14, color=MUTED, weight=ft.FontWeight.W_500)
+                               ] if info["genres"] else []
         description.value = info["description"]
         more_btn.visible = len(info["description"]) > 280
         if info["actors"]:
@@ -4632,7 +4631,7 @@ def main(page: ft.Page, reopen=None):
             for si, season in enumerate(seasons):
                 if len(seasons) > 1:
                     blocks.append(ft.Container(
-                        ft.Text(season["name"], size=18, weight=ft.FontWeight.W_800, color=TEXT),
+                        ft.Text(season["name"], size=18, weight=ft.FontWeight.W_700, color=TEXT),
                         padding=ft.Padding.only(top=14 if si else 0, bottom=2)))
                 if season.get("locked"):
                     blocks.append(ft.Row([ft.Icon(ft.Icons.LOCK_OUTLINE_ROUNDED, size=16, color=MUTED),
@@ -4658,8 +4657,7 @@ def main(page: ft.Page, reopen=None):
                                    color="#FFFFFF" if i == current else MUTED)]
                           if s.get("locked") else []), spacing=5, tight=True),
                 padding=ft.Padding.symmetric(horizontal=16, vertical=9), border_radius=20,
-                gradient=ui.ACCENT_GRADIENT if i == current else None,
-                bgcolor=None if i == current else SURFACE_2,
+                bgcolor=ACCENT if i == current else SURFACE_2,
                 border=ft.Border.all(1, BORDER), animate=ui.FAST,
                 on_click=lambda e, i=i: select(i),
             ), lambda e, i=i: select(i), radius=20,
@@ -4678,7 +4676,7 @@ def main(page: ft.Page, reopen=None):
 
     def episode_row(ctx, si, ei, ep):
         num_text = ft.Text(str(ep["num"]) if ep["num"] is not None else "▶", size=13,
-                           weight=ft.FontWeight.W_800, color=ACCENT)
+                           weight=ft.FontWeight.W_700, color=ACCENT)
         num = ft.Container(
             num_text, width=38, height=38, border_radius=19, alignment=ft.Alignment.CENTER,
             bgcolor=ft.Colors.with_opacity(0.1, ACCENT),
@@ -4718,7 +4716,7 @@ def main(page: ft.Page, reopen=None):
         def highlight(h):
             if not TV:  # на телевізорі фон дає кнопка (миттєво)
                 row.bgcolor = SURFACE_2 if h else SURFACE
-            num.gradient = ui.ACCENT_GRADIENT if h else None
+            num.bgcolor = ACCENT if h else ft.Colors.with_opacity(0.1, ACCENT)
             num_text.color = "#FFFFFF" if h else ACCENT
             play_icon.opacity = 1 if (h or done) else 0.5
             play_icon.color = ACCENT if (h or done) else MUTED
@@ -4751,7 +4749,7 @@ def main(page: ft.Page, reopen=None):
                 done.set_result(None)
 
         show_dialog(ft.AlertDialog(
-            title=ft.Text("Яким плеєром дивитись?", weight=ft.FontWeight.W_800),
+            title=ft.Text("Яким плеєром дивитись?", weight=ft.FontWeight.W_700),
             bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
             on_dismiss=dismissed,
             content=ft.Column([
@@ -4988,7 +4986,7 @@ def main(page: ft.Page, reopen=None):
             """Значок у стилі «CC»: текст у рамці; напівпрозорий — вимкнено."""
             # плеєр завжди темний (відео) — значки білі і в світлій темі
             return ft.Container(
-                ft.Text(text, size=12, weight=ft.FontWeight.W_800, color="#FFFFFF"),
+                ft.Text(text, size=12, weight=ft.FontWeight.W_700, color="#FFFFFF"),
                 width=width, height=24, border_radius=6, alignment=ft.Alignment.CENTER,
                 border=ft.Border.all(1.6, "#FFFFFF"), opacity=1 if bright else 0.4,
                 margin=2 if is_mobile else 6,
@@ -5082,7 +5080,7 @@ def main(page: ft.Page, reopen=None):
                                   if len(buttons) > 7 else None)
             show_dialog(ft.AlertDialog(
                 on_dismiss=dismissed,
-                title=ft.Text(title, size=18 if compact else 22, weight=ft.FontWeight.W_800,
+                title=ft.Text(title, size=18 if compact else 22, weight=ft.FontWeight.W_700,
                               color=TEXT),
                 title_padding=ft.Padding.only(left=24, right=24, top=16, bottom=4)
                 if compact else None,
@@ -5281,7 +5279,7 @@ def main(page: ft.Page, reopen=None):
 
             field.on_submit = lambda e: page.run_task(done)
             show_dialog(ft.AlertDialog(
-                title=ft.Text(f"Спарювання з «{device['name']}»", weight=ft.FontWeight.W_800),
+                title=ft.Text(f"Спарювання з «{device['name']}»", weight=ft.FontWeight.W_700),
                 bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
                 content=ft.Column([msg, field], tight=True, spacing=12, width=dialog_width()),
                 actions=[ft.TextButton("Скасувати", on_click=lambda e: page.pop_dialog(),
@@ -5299,7 +5297,7 @@ def main(page: ft.Page, reopen=None):
                                             spacing=12)], tight=True, spacing=10,
                                     width=dialog_width())
             dlg = ft.AlertDialog(
-                title=ft.Text("Транслювати на", weight=ft.FontWeight.W_800),
+                title=ft.Text("Транслювати на", weight=ft.FontWeight.W_700),
                 bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
                 content=devices_col,
                 actions=[ft.TextButton("Скасувати", on_click=lambda e: page.pop_dialog(),
@@ -5407,7 +5405,7 @@ def main(page: ft.Page, reopen=None):
             cast_ui.update(pos=pos_text, bar=bar, toggle=toggle)
             p["cast_dlg"] = cast_dlg = ft.AlertDialog(
                 title=ft.Row([ft.Icon(ft.Icons.CAST_CONNECTED_ROUNDED, color=ACCENT),
-                              ft.Text(sess.name, weight=ft.FontWeight.W_800, expand=True,
+                              ft.Text(sess.name, weight=ft.FontWeight.W_700, expand=True,
                                       max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)], spacing=10),
                 bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
                 content=ft.Column([
@@ -5694,7 +5692,7 @@ def main(page: ft.Page, reopen=None):
                 timeline_box.update()
 
             timeline = focusable(timeline_box, toggle_play, timeline_focus)
-            tv_title = ft.Text(show, size=22, weight=ft.FontWeight.W_800, color="#FFFFFF",
+            tv_title = ft.Text(show, size=22, weight=ft.FontWeight.W_700, color="#FFFFFF",
                                max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
             tv_overlay = ft.Container(
                 ft.Column([
@@ -5950,7 +5948,7 @@ def main(page: ft.Page, reopen=None):
                 padding=ft.Padding.symmetric(horizontal=16, vertical=14)))
         next_card = ft.Container(
             ft.Column([
-                ft.Text("НАСТУПНА СЕРІЯ", size=11, weight=ft.FontWeight.W_800, color=ACCENT),
+                ft.Text("НАСТУПНА СЕРІЯ", size=11, weight=ft.FontWeight.W_700, color=ACCENT),
                 next_name, next_count,
                 ft.Row([next_now_btn, next_cancel], spacing=8),
             ], spacing=6, tight=True),

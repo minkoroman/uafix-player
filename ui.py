@@ -5,26 +5,32 @@ import appearance
 
 # ───────────── палітра ─────────────
 LIGHT = appearance.CURRENT["theme"] == "light"
+# Нейтральний графіт, як у Apple TV / Google TV: колір дають постери й кадри, а не
+# інтерфейс. Акцент (бренд) — лише там, де він щось означає: прогрес, вибране, активний розділ.
 if LIGHT:
-    BG = "#F2F3F5"
+    BG = "#F5F5F7"
     SURFACE = "#FFFFFF"
     SURFACE_2 = "#FFFFFF"
-    SURFACE_3 = "#ECEEF2"
-    BORDER = "#1F000000"
-    TEXT = "#15171C"
-    MUTED = "#5F6672"
-    ACCENT = "#EE5A2C"  # трохи темніший — контрастніший на білому
+    SURFACE_3 = "#E8E8ED"
+    BORDER = "#14000000"
+    TEXT = "#1D1D1F"
+    MUTED = "#6E6E73"
+    ACCENT = "#E8542A"  # трохи темніший — контрастніший на білому
 else:
-    BG = "#0D0E12"
-    SURFACE = "#15171C"
-    SURFACE_2 = "#1C1F26"
-    SURFACE_3 = "#262A33"
-    BORDER = "#14FFFFFF"
-    TEXT = "#F3F4F6"
-    MUTED = "#9BA1AC"
+    BG = "#0B0B0D"
+    SURFACE = "#141416"
+    SURFACE_2 = "#1C1C1F"
+    SURFACE_3 = "#2A2A2E"
+    BORDER = "#12FFFFFF"
+    TEXT = "#F5F5F7"
+    MUTED = "#A1A1A6"
     ACCENT = "#FF6A3D"
 ACCENT_2 = "#FFB547"
 GOLD = "#F5C518"
+# головна дія («Дивитись») — біла кнопка з темним текстом, як в Apple TV (у світлій темі — навпаки)
+PRIMARY_BG = "#1D1D1F" if LIGHT else "#F5F5F7"
+PRIMARY_FG = "#FFFFFF" if LIGHT else "#0B0B0D"
+FONT = "Golos Text"  # український гротеск, добре читається з дивана; assets/fonts
 
 EASE = ft.AnimationCurve.EASE_OUT_CUBIC
 FAST = ft.Animation(160, EASE)
@@ -41,6 +47,7 @@ ACCENT_GRADIENT = ft.LinearGradient(
 
 def theme():
     return ft.Theme(
+        font_family=FONT,
         color_scheme_seed=ACCENT,
         # surface_tint прозорий: Material 3 інакше домішує оранжевий до фону меню й вікон
         color_scheme=ft.ColorScheme(primary=ACCENT, surface=BG, on_surface=TEXT,
