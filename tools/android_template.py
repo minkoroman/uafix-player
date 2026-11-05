@@ -131,7 +131,7 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
-    private fun setImmersive(on: Boolean) {
+    private fun setSystemBarsHidden(on: Boolean) {
         try {
             val c = WindowCompat.getInsetsController(window, window.decorView)
             if (on) {
@@ -226,7 +226,7 @@ class MainActivity : FlutterFragmentActivity() {
             return true
         }
         if (data.host == "immersive") {  // плеєр на весь екран: сховати / показати системні панелі
-            setImmersive(data.getQueryParameter("on") == "1")
+            setSystemBarsHidden(data.getQueryParameter("on") == "1")
             return true
         }
         if (data.host == "icon") {  // вибір іконки в налаштуваннях
