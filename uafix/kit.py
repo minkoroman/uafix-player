@@ -180,7 +180,7 @@ def tmdb_poster(page, item, width, on_meta=None, meta=True, lazy=False):
     if not tmdb.enabled() or not item.get("url"):
         return box
     if _slots is None:
-        _slots = _Lifo(3 if T.TV else 6)  # ТВ: не забирати всі потоки
+        _slots = _Lifo(2 if T.TV else 6)  # ТВ: не забирати процесор у пульта
 
     async def look():
         import core
@@ -203,8 +203,9 @@ def tmdb_poster(page, item, width, on_meta=None, meta=True, lazy=False):
                     m = await asyncio.wait_for(asyncio.to_thread(
                         tmdb.meta, item["url"], item.get("title", ""), item.get("orig", ""),
                         item.get("year", ""),
-                        # за кордоном сторінка сайту йде через Tor — для картки це задовго
-                        None if core.GEO["site"] else core.site_meta), 15)
+                        # запасне джерело рейтингу — сторінка сайту: на ТВ її розбір гальмував
+                        # пульт, за кордоном вона йде через Tor — там без неї
+                        None if (core.GEO["site"] or T.TV) else core.site_meta), 15)
                     if m and (m["rating"] or m["genres"]):
                         on_meta(m["rating"], m["genres"], True)
         except Exception:
@@ -229,12 +230,14 @@ def _want(page, url, on):
 
 
 async def _prefetch_later(url, n):
-    await asyncio.sleep(0.5)
+    # ТВ: лише якщо справді зупинились на картці, і лише сторінку (без пошуку відео) —
+    # розбір плеєрів на слабкому процесорі гальмував реакцію на пульт
+    await asyncio.sleep(1.2 if T.TV else 0.5)
     if n != _pf["n"]:
         return  # пішли далі
     import core
     try:
-        await run_fast(core.prefetch, url, True)
+        await run_fast(core.prefetch, url, not T.TV)
     except Exception:
         pass
 

@@ -63,7 +63,8 @@ class Grid:
     def want(self, row):
         """Шукати постери для рядів біля row (ряд у фокусі / на екрані)."""
         per = self.per or 1
-        for c in self.cards[max(0, (row - 1) * per):(row + 4) * per]:
+        ahead = 2 if self.app.tv else 4  # ТВ: на екрані ~2,5 ряду — далі не шукаємо наперед
+        for c in self.cards[row * per:(row + ahead) * per]:
             c.start()
 
     def flush(self):
@@ -135,6 +136,7 @@ class Grid:
 
     def next_page(self):
         if not self.busy:
+            self.busy = True  # одразу: кілька натискань пульта поспіль запускали 2–3 завантаження
             self.app.page.run_task(self.load_next)
 
     async def load_next(self):
