@@ -40,6 +40,9 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import io.flutter.embedding.android.FlutterFragmentActivity
 import java.io.File
 import org.torproject.jni.TorService
@@ -128,6 +131,20 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
+    private fun setImmersive(on: Boolean) {
+        try {
+            val c = WindowCompat.getInsetsController(window, window.decorView)
+            if (on) {
+                c.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                c.hide(WindowInsetsCompat.Type.systemBars())
+            } else {
+                c.show(WindowInsetsCompat.Type.systemBars())
+            }
+        } catch (e: Exception) {
+        }
+    }
+
     private fun setPip(on: Boolean) {
         pipAllowed = on && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
@@ -206,6 +223,10 @@ class MainActivity : FlutterFragmentActivity() {
         }
         if (data.host == "pip") {  // плеєр відкрито / закрито
             setPip(data.getQueryParameter("on") == "1")
+            return true
+        }
+        if (data.host == "immersive") {  // плеєр на весь екран: сховати / показати системні панелі
+            setImmersive(data.getQueryParameter("on") == "1")
             return true
         }
         if (data.host == "icon") {  // вибір іконки в налаштуваннях

@@ -60,6 +60,9 @@ class App:
         if page.platform in (ft.PagePlatform.MACOS, ft.PagePlatform.WINDOWS):
             page.window.width, page.window.height = 1280, 820
             page.window.min_width, page.window.min_height = 760, 540
+            if os.environ.get("UAFIX_MOBILE") == "1":  # розробка: телефон вертикально
+                page.window.min_width, page.window.min_height = 300, 500
+                page.window.width, page.window.height = 400, 860
             page.window.bgcolor = T.FACADE
             page.update()
             try:  # новий розмір — від старого лівого краю: вікно вилазило праворуч за екран
@@ -346,6 +349,8 @@ class App:
     def on_resize(self, e):
         """Ширина вікна змінилась — сітки розділів перекладають картки по рядах."""
         kit.quiet()
+        if self.player is not None:
+            self.player.on_resize()
         screen = self.screens.get(self.section)
         if hasattr(screen, "relayout"):
             before = screen.per

@@ -114,7 +114,8 @@ class Player:
             kit.kicker(" · ".join(x for x in (season if what else "", what, self.voice) if x),
                        color="#B8AC95"),
             ft.Text(self.title.info.get("title") or self.title.item["title"], size=T.S_HEAD + 6,
-                    weight=ft.FontWeight.W_800, color="#F1E6CC", max_lines=1)], spacing=4, tight=True)
+                    weight=ft.FontWeight.W_800, color="#F1E6CC", max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS)], spacing=4, tight=True, expand=True)
         back = kit.plate(ft.Icon(ft.Icons.ARROW_BACK_ROUNDED, size=24),
                          on_click=lambda e: self.app.back(), pad=(12, 10), kind="glass")
         top = ft.Container(ft.Row([back, heading], spacing=16), padding=ft.Padding.only(
@@ -124,9 +125,12 @@ class Player:
                                        colors=["#CC000000", "#00000000"]))
         bottom = ft.Container(ft.Column([
             bar_box,
-            ft.Row([ft.Row(buttons, spacing=10), ft.Row(options + [self.time_text], spacing=10)],
+            # телефон: кнопки переносяться рядками (вертикально всі в один ряд не влазили)
+            ft.Row([ft.Row(buttons, spacing=10, wrap=self.app.mobile, run_spacing=8),
+                    ft.Row(options + [self.time_text], spacing=10, wrap=self.app.mobile,
+                           run_spacing=8)],
                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=self.app.mobile,
-                   vertical_alignment=ft.CrossAxisAlignment.CENTER)], spacing=14),
+                   run_spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER)], spacing=14),
             padding=ft.Padding.only(left=self.app.side, right=self.app.side, top=50, bottom=26),
             gradient=ft.LinearGradient(begin=ft.Alignment.BOTTOM_CENTER,
                                        end=ft.Alignment.TOP_CENTER,
@@ -169,6 +173,8 @@ class Player:
         self.app.player = self
         self.app.page.run_task(self.after_start)
         self.app.page.run_task(self.ticker)
+        if self.app.mobile:
+            self.immersive(self.landscape())
         self.show_overlay(False)
         if mini:  # перезапуск з міні-плеєра (інша озвучка / якість) — лишитись маленьким
             self.mini_on = True
@@ -208,6 +214,41 @@ class Player:
             ("cover", "Заповнити", ft.Icons.CROP_FREE_ROUNDED),
             ("fill", "Розтягнути", ft.Icons.OPEN_IN_FULL_ROUNDED)]
 
+    # ── телефон: поворот горизонтально — на весь екран (без системних панелей)
+    def landscape(self):
+        p = self.app.page
+        return bool(p.width and p.height and p.width > p.height)
+
+    def immersive(self, on):
+        if self.app.mobile and self.app.android and getattr(self, "_immersive", None) != on:
+            self._immersive = on
+            self.app.page.run_task(ft.UrlLauncher().launch_url,
+                                   f"{CTRL}://immersive?on={1 if on else 0}",
+                                   mode=ft.LaunchMode.EXTERNAL_APPLICATION)
+
+    def on_resize(self):
+        """Повернули телефон: горизонтально — повний екран і обраний масштаб, вертикально —
+        системні панелі назад і кадр цілком."""
+        if not self.app.mobile or not self.alive:
+            return
+        land = self.landscape()
+        self.immersive(land)
+        if not self.mini_on:
+            self.video.fit = self.fit_mode()
+            try:
+                self.video.update()
+            except Exception:
+                pass
+
+    def phone_fullscreen(self, e=None):
+        """Кнопка «на весь екран» на телефоні: повернути горизонтально (і назад)."""
+        kit.quiet()
+        page = self.app.page
+        self.forced_land = not getattr(self, "forced_land", False)
+        orient = [ft.DeviceOrientation.LANDSCAPE_LEFT, ft.DeviceOrientation.LANDSCAPE_RIGHT] \
+            if self.forced_land else [ft.DeviceOrientation.PORTRAIT_UP]
+        page.run_task(page.set_allowed_device_orientations, orient)
+
     def fit_key(self):
         mode = self.app.store.settings.get("fit") or "auto"
         if mode not in [k for k, _, _ in self.FITS]:  # «авто» зі старих налаштувань
@@ -237,6 +278,8 @@ class Player:
 
     def fit_mode(self):
         """Масштаб кадру з налаштувань; «Авто» — на телефоні заповнити екран, деінде вписати."""
+        if self.app.mobile and not self.landscape():
+            return ft.BoxFit.CONTAIN  # телефон вертикально — кадр цілком (як у 1.x)
         mode = self.fit_key()
         return {"cover": ft.BoxFit.COVER, "fill": ft.BoxFit.FILL}.get(mode, ft.BoxFit.CONTAIN)
 
@@ -311,9 +354,9 @@ class Player:
                 self.ended = True
                 await self.next_episode()
                 return
+            self.pip(playing)  # сам відсіює повтори; раніше вмикався лише після паузи
             if self.paused == playing:
                 self.set_play_icon(playing)
-                self.pip(playing)
             if self.overlay.opacity == 1:
                 if not self.scrubbing:
                     self.time_text.value = (f"{fmt_time(pos)} / {fmt_time(dur)}" if dur
@@ -396,6 +439,10 @@ class Player:
             out.append(kit.plate(kit.label(f"{q}p", ft.Icons.HD_ROUNDED),
                                  on_click=lambda e: self.choose_quality(), kind="glass",
                                  pad=(14, 12)))
+        if self.app.mobile:  # телефон: на весь екран — горизонтально, без системних панелей
+            out.append(kit.plate(ft.Icon(ft.Icons.FULLSCREEN_ROUNDED, size=24),
+                                 on_click=self.phone_fullscreen, kind="glass", pad=(14, 12),
+                                 tooltip="На весь екран"))
         if not self.app.tv and not self.app.mobile:  # ПК: міні-плеєр і повний екран (F)
             out.append(kit.plate(ft.Icon(ft.Icons.PICTURE_IN_PICTURE_ALT_ROUNDED, size=24),
                                  on_click=lambda e: self.app.page.run_task(self.toggle_mini),
@@ -629,6 +676,10 @@ class Player:
             self.app.page.run_task(self.toggle_mini)
         if self.pip_on:
             self.pip(False)
+        if self.app.mobile:
+            self.immersive(False)
+            if getattr(self, "forced_land", None) is not None and not self.reopening:
+                self.app.page.run_task(self.app.page.set_allowed_device_orientations, [])
 
         if self.last[1]:
             self.save(*self.last)
