@@ -166,7 +166,15 @@ class Player:
                           style=ft.ButtonStyle(bgcolor="#99000000", padding=0,
                                                shape=ft.CircleBorder())),
             right=10, top=10, visible=False)
-        stack = ft.Stack([self.video, self.overlay, self.mini_drag, self.mini_btn], expand=True)
+        if self.app.mobile:
+            # телефон — як у 1.x: вбудована мобільна панель плеєра (подвійний тап ліворуч /
+            # праворуч — ±10 с, тап і перетягування по смужці, повний екран з поворотом)
+            self.video.controls = self.phone_controls(season if what else "", what)
+            self.overlay.opacity = 0  # ticker не оновлює нашої (відсутньої) панелі
+            stack = ft.Stack([self.video], expand=True)
+        else:
+            stack = ft.Stack([self.video, self.overlay, self.mini_drag, self.mini_btn],
+                             expand=True)
         self.view = self.app.push("/play", stack, bgcolor="#000000")
         self.view.on_close = self.close
         self.app.key_handler = self.on_key
@@ -240,14 +248,71 @@ class Player:
             except Exception:
                 pass
 
-    def phone_fullscreen(self, e=None):
-        """Кнопка «на весь екран» на телефоні: повернути горизонтально (і назад)."""
-        kit.quiet()
-        page = self.app.page
-        self.forced_land = not getattr(self, "forced_land", False)
-        orient = [ft.DeviceOrientation.LANDSCAPE_LEFT, ft.DeviceOrientation.LANDSCAPE_RIGHT] \
-            if self.forced_land else [ft.DeviceOrientation.PORTRAIT_UP]
-        page.run_task(page.set_allowed_device_orientations, orient)
+    def phone_controls(self, season, what):
+        """Панель плеєра на телефоні (як у 1.x) — та сама вертикально й горизонтально."""
+        def btn(icon, tip, action, size=26):
+            return ft.IconButton(icon, icon_color="#FFFFFF", icon_size=size, tooltip=tip,
+                                 on_click=lambda e: (kit.quiet(), action()))
+        run = self.app.page.run_task
+        primary = [btn(ft.Icons.REPLAY_10_ROUNDED, "Назад на 10 с",
+                       lambda: run(self.seek_by, -10), 36), ft.Container(width=20),
+                   fv.VideoPlayOrPauseButton(icon_size=56), ft.Container(width=20),
+                   btn(ft.Icons.FORWARD_10_ROUNDED, "Вперед на 10 с",
+                       lambda: run(self.seek_by, 10), 36)]
+        if self.has_next():
+            primary += [ft.Container(width=12),
+                        btn(ft.Icons.SKIP_NEXT_ROUNDED, "Наступна серія",
+                            lambda: run(self.next_episode), 32)]
+        bottom = [fv.VideoPositionIndicator(), fv.VideoSpacer()]
+        if len(set(self.voices())) > 1:
+            bottom.append(btn(ft.Icons.RECORD_VOICE_OVER_ROUNDED, "Озвучка", self.choose_voice))
+        if self.subs():
+            bottom.append(btn(ft.Icons.SUBTITLES_ROUNDED, "Субтитри", self.choose_subs))
+        bottom.append(btn(ft.Icons.TUNE_ROUNDED, "Якість і масштаб", self.choose_more))
+        from .casting import Casting
+        self.casting = Casting(self)
+        bottom += [btn(ft.Icons.CAST_ROUNDED, "Транслювати на телевізор",
+                       lambda: run(self.casting.open)), fv.VideoFullscreenButton()]
+        kick = " · ".join(x for x in (season, what, self.voice) if x)
+        top = [btn(ft.Icons.ARROW_BACK_ROUNDED, "Назад", self.app.back),
+               ft.Column([ft.Text(kick.upper(), size=T.S_SMALL - 1, color="#B8AC95",
+                                  weight=ft.FontWeight.W_700, max_lines=1),
+                          ft.Text(self.title.info.get("title") or self.title.item["title"],
+                                  size=T.S_HEAD, weight=ft.FontWeight.W_800, color="#F1E6CC",
+                                  max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)],
+                         spacing=2, tight=True, expand=True)]
+        return fv.MaterialVideoControls(
+            seek_on_double_tap=True,
+            seek_on_double_tap_backward_duration=ft.Duration(seconds=10),
+            seek_on_double_tap_forward_duration=ft.Duration(seconds=10),
+            automatically_imply_skip_next_button=False,
+            automatically_imply_skip_previous_button=False,
+            seek_bar_position_color=T.SIGNAL, seek_bar_thumb_color=T.SIGNAL,
+            seek_bar_margin=ft.Padding.only(left=24, right=24, bottom=18),
+            top_button_bar=top, primary_button_bar=primary, bottom_button_bar=bottom,
+            bottom_button_bar_margin=ft.Padding.only(left=8, right=8, bottom=22))
+
+    def choose_more(self):
+        """Телефон: якість і масштаб — одним вікном (окремими кнопками не вміщалось)."""
+        variants = core._VARIANTS.get(self.entry["url"]) or {}
+        opts = []
+        if len(variants) > 1:
+            cur = core.pick_quality(variants, self.app.store.settings.get("quality") or "1080")
+            opts += [(("q", k), f"Якість · {k}p" + (" ✓" if k == cur else ""))
+                     for k in sorted(variants, key=int, reverse=True)]
+        fit = self.fit_key()
+        opts += [(("f", k), f"Масштаб · {n}" + (" ✓" if k == fit else "")) for k, n, _ in self.FITS]
+
+        def apply(v):
+            kind, val = v
+            if kind == "q":
+                self.app.store.set("quality", val)
+                self.app.page.run_task(self.reopen)
+            else:
+                self.app.store.set("fit", val)
+                self.video.fit = self.fit_mode()
+                self.video.update()
+        self.choose("Якість і масштаб", opts, None, apply)
 
     def fit_key(self):
         mode = self.app.store.settings.get("fit") or "auto"
@@ -288,6 +353,8 @@ class Player:
         """Панель видна: кнопки на місці (схована — їх немає зовсім, щоб не натиснути
         невидиму). overlay.opacity — лише позначка «видно / ні»."""
         self.shown_at = time.monotonic()
+        if self.app.mobile:
+            return  # телефон: панель вбудована в плеєр, нашої на екрані нема
         if self.overlay.opacity != 1:
             self.overlay.opacity = 1
             self.top.visible = self.bottom.visible = not self.mini_on
@@ -296,6 +363,8 @@ class Player:
                 self.app.page.run_task(self.play_btn.focus)
 
     def hide_overlay(self):
+        if self.app.mobile:
+            return
         if self.overlay.opacity != 0:
             self.overlay.opacity = 0
             self.top.visible = self.bottom.visible = False
@@ -439,10 +508,6 @@ class Player:
             out.append(kit.plate(kit.label(f"{q}p", ft.Icons.HD_ROUNDED),
                                  on_click=lambda e: self.choose_quality(), kind="glass",
                                  pad=(14, 12)))
-        if self.app.mobile:  # телефон: на весь екран — горизонтально, без системних панелей
-            out.append(kit.plate(ft.Icon(ft.Icons.FULLSCREEN_ROUNDED, size=24),
-                                 on_click=self.phone_fullscreen, kind="glass", pad=(14, 12),
-                                 tooltip="На весь екран"))
         if not self.app.tv and not self.app.mobile:  # ПК: міні-плеєр і повний екран (F)
             out.append(kit.plate(ft.Icon(ft.Icons.PICTURE_IN_PICTURE_ALT_ROUNDED, size=24),
                                  on_click=lambda e: self.app.page.run_task(self.toggle_mini),
@@ -497,9 +562,10 @@ class Player:
             self.video.subtitle_track = self.track()
             self.video.update()
             sub = next((x for x in self.subs() if x["lang"] == lang), None)
-            self.sub_btn.content = kit.label(sub["title"] if sub else "Без субтитрів",
-                                             ft.Icons.SUBTITLES_ROUNDED)
-            self.sub_btn.update()
+            if not self.app.mobile:  # телефон: кнопка субтитрів — іконка у вбудованій панелі
+                self.sub_btn.content = kit.label(sub["title"] if sub else "Без субтитрів",
+                                                 ft.Icons.SUBTITLES_ROUNDED)
+                self.sub_btn.update()
 
         self.choose("Субтитри", [(None, "Без субтитрів")] +
                     [(x["lang"], x["title"]) for x in self.subs()], self.sub_lang, apply)
@@ -536,8 +602,11 @@ class Player:
         if self.play_btn.content.icon != icon or self.center_icon.visible != show_center:
             self.play_btn.content.icon = icon
             self.center_icon.visible = show_center
-            self.play_btn.update()
-            self.center_icon.update()
+            try:
+                self.play_btn.update()
+                self.center_icon.update()
+            except Exception:  # телефон: нашої панелі на екрані нема
+                pass
 
     # ── керування
     async def toggle(self):
