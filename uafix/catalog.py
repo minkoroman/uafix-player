@@ -8,19 +8,23 @@ from . import kit, theme as T
 
 
 class Grid:
-    """Сітка афіш з кнопкою «Показати ще»."""
+    """Сітка афіш, що довантажується сама. Кожен ряд — окремий елемент списку: Flutter
+    будує й тримає в пам'яті лише ряди біля екрана (раніше вся сітка була одним блоком —
+    на ТВ пам'ять росла з кожним рядом), а постери шукаються лише для рядів поруч."""
 
     def __init__(self, app, title):
         self.app = app
         self.card_w = 104 if app.mobile else (118 if app.tv else 160)
         self.title = T.caps(title, size=T.S_HEAD + 8 if not app.mobile else T.S_HEAD + 4)
         self.status = T.text("", size=T.S_SMALL, color=T.DIM)
-        self.grid = ft.Row(wrap=True, spacing=4, run_spacing=10)
+        self.cards = []     # усі картки по порядку
+        self.rows = []      # ft.Row по per_row карток — окремі елементи self.body
+        self.per = 0        # скільки карток у ряду зараз
+        self.head = []      # заголовок, поля, статус — над рядами
         self.page_no = 0
         self.busy = False
         self.extra = []  # що показати над сіткою (поле пошуку)
         self.has_more = False
-        # наступна сторінка — сама, коли до кінця лишається приблизно екран
         self.body = ft.ListView(expand=True, padding=ft.Padding.only(
             left=app.side - 6, right=app.side - 6, top=28, bottom=40), spacing=14,
             scroll_interval=200, on_scroll=self.on_scroll)
@@ -28,10 +32,45 @@ class Grid:
     def view(self):
         # TV: «стінка» на всю ширину над усім — «вгору» з верхнього ряду не виводить у меню
         top = [self.app.focus_wall(self.bounce, width=4000)] if self.app.tv else []
-        self.body.controls = top + [ft.Container(self.title, padding=ft.Padding.only(left=6)),
-                                    *self.extra, ft.Container(self.status, padding=ft.Padding.only(left=6)),
-                                    self.grid]
+        self.head = top + [ft.Container(self.title, padding=ft.Padding.only(left=6)),
+                           *self.extra, ft.Container(self.status, padding=ft.Padding.only(left=6))]
+        self.relayout(force=True)
         return self.body
+
+    # ── ряди
+    def relayout(self, force=False):
+        """Розкласти картки по рядах (заново — якщо змінилась ширина вікна)."""
+        per = self.per_row()
+        if per == self.per and not force:
+            return
+        self.per = per
+        self.rows = [self._row(self.cards[k:k + per]) for k in range(0, len(self.cards), per)]
+        self.body.controls = self.head + self.rows
+
+    def _row(self, cards):
+        return ft.Row(list(cards), spacing=4, vertical_alignment=ft.CrossAxisAlignment.START)
+
+    def add_cards(self, cards):
+        if not self.per:
+            self.per = self.per_row()
+        for c in cards:
+            if not self.rows or len(self.rows[-1].controls) >= self.per:
+                self.rows.append(self._row([]))
+                self.body.controls.append(self.rows[-1])
+            self.rows[-1].controls.append(c)
+            self.cards.append(c)
+
+    def want(self, row):
+        """Шукати постери для рядів біля row (ряд у фокусі / на екрані)."""
+        per = self.per or 1
+        for c in self.cards[max(0, (row - 1) * per):(row + 4) * per]:
+            c.start()
+
+    def flush(self):
+        try:
+            self.body.update()
+        except Exception:
+            pass
 
     _rebuild = None  # як перебудувати елемент у фокусі (для «стінки» вгорі)
 
@@ -43,7 +82,7 @@ class Grid:
     def make_card(self, it, i, autofocus=False):
         card = kit.poster_card(self.app.page, it, self.app.open_title, self.card_w,
                                meta=self.app.store.settings.get("card_meta", True),
-                               autofocus=autofocus,
+                               autofocus=autofocus, lazy=True,
                                on_focus=lambda f, i=i: f and self.card_focused(i))
         card.data = it["url"]
         card.item_ = it
@@ -52,29 +91,43 @@ class Grid:
     def card_focused(self, i):
         self._rebuild = lambda: self.rebuild_card(i)
         self.app.content_focused(self.bounce)
+        self.want(i // (self.per or 1))
         self.near_end(i)
 
     def rebuild_card(self, i):
-        if i >= len(self.grid.controls):
+        if i >= len(self.cards):
             return None
-        fresh = self.make_card(self.grid.controls[i].item_, i)
-        self.grid.controls[i] = fresh
-        try:
-            self.grid.update()
-        except Exception:
-            return None
+        fresh = self.make_card(self.cards[i].item_, i)
+        fresh.start()
+        self.cards[i] = fresh
+        r, k = divmod(i, self.per or 1)
+        if r < len(self.rows) and k < len(self.rows[r].controls):
+            self.rows[r].controls[k] = fresh
+            try:
+                self.rows[r].update()
+            except Exception:
+                return None
         return fresh
 
     def fetch_page(self, n):
         raise NotImplementedError
 
     def reset(self):
-        self.grid.controls = []
+        self.cards, self.rows = [], []
+        self.per = self.per_row()
+        self.body.controls = list(self.head)
         self.page_no = 0
         self.has_more = False
 
+    def row_height(self):
+        return self.card_w / kit.RATIO + 14 + 70  # постер + підписи + відступ між рядами
+
     def on_scroll(self, e: ft.OnScrollEvent):
         kit.quiet()
+        # мишка / палець: постери — для рядів, що на екрані
+        if e.pixels is not None and self.rows:
+            head = 150 + 60 * len(self.extra)
+            self.want(max(0, int((e.pixels - head) // self.row_height())))
         # extent_after — скільки ще прокручувати до кінця
         if self.has_more and not self.busy and e.extent_after is not None and \
                 e.extent_after < 900:
@@ -86,33 +139,32 @@ class Grid:
 
     async def load_next(self):
         self.busy = True
-        self.status.value = "Завантажую…" if not self.grid.controls else ""
-        try:
-            self.body.update()
-        except Exception:
-            pass
+        self.status.value = "Завантажую…" if not self.cards else ""
+        self.flush()
         try:
             items = await asyncio.to_thread(self.fetch_page, self.page_no + 1)
             self.page_no += 1
-            self.status.value = "" if (items or self.grid.controls) else "Нічого не знайдено"
+            self.status.value = "" if (items or self.cards) else "Нічого не знайдено"
         except Exception as ex:
             items = []
             self.status.value = core.friendly_error(ex, "розділ")
-        known = {getattr(c, "data", None) for c in self.grid.controls}
+        known = {getattr(c, "data", None) for c in self.cards}
+        first = not self.cards
+        new = []
         for it in items:
             if it["url"] in known:
                 continue
-            self.grid.controls.append(self.make_card(
-                it, len(self.grid.controls), autofocus=self.app.tv and not self.grid.controls))
+            new.append(self.make_card(it, len(self.cards) + len(new),
+                                      autofocus=self.app.tv and first and not new))
+        self.add_cards(new)
+        if first:
+            self.want(0)
         self.has_more = len(items) >= 10
         self.busy = False
-        try:
-            self.body.update()
-        except Exception:
-            pass
+        self.flush()
         # сайт дає по 12 на сторінку: поки екран не заповнений (прокрутки нема — й події
         # прокрутки нема), довантажуємо одразу
-        if self.has_more and len(self.grid.controls) < self.MIN_ITEMS:
+        if self.has_more and len(self.cards) < self.MIN_ITEMS:
             self.next_page()
 
     MIN_ITEMS = 36
@@ -123,7 +175,7 @@ class Grid:
         if self.app.tv and n < self.per_row():
             self._top_n = getattr(self, "_top_n", 0) + 1
             self.app.page.run_task(self._to_top, self._top_n)
-        if self.has_more and not self.busy and n >= len(self.grid.controls) - 16:
+        if self.has_more and not self.busy and n >= len(self.cards) - 16:
             self.next_page()
 
     def per_row(self):
@@ -310,7 +362,7 @@ class Search(Grid):
             chips.append(kit.plate(kit.label("Очистити"), pad=(14, 10),
                                    on_click=lambda e: self.forget(None)))
         self.recent.controls = chips
-        self.recent_box.visible = bool(items) and not (self.query and self.grid.controls
+        self.recent_box.visible = bool(items) and not (self.query and self.cards
                                                          and t == self.query.lower())
 
     def refresh_recent(self, typed=""):
@@ -374,12 +426,10 @@ class Favorites(Grid):
         self.reset()
         favs = self.app.store.active_favorites()
         self.status.value = "" if favs else "Тут з'являться фільми, які ви додасте в обране"
-        for i, it in enumerate(favs):
-            self.grid.controls.append(self.make_card(it, i, autofocus=self.app.tv and i == 0))
-        try:
-            self.body.update()
-        except Exception:
-            pass
+        self.add_cards([self.make_card(it, i, autofocus=self.app.tv and i == 0)
+                        for i, it in enumerate(favs)])
+        self.want(0)
+        self.flush()
 
 
 class History(Grid):
@@ -392,10 +442,10 @@ class History(Grid):
         self.reset()
         items = [h for h in self.app.store.history if not h.get("removed") and h.get("url")]
         self.status.value = "" if items else "Тут з'являться фільми й серіали, які ви дивились"
+        cards = []
         for i, h in enumerate(items):
             it = {k: h.get(k, "") for k in ("url", "title", "orig", "poster", "age")}
-            self.grid.controls.append(self.make_card(it, i, autofocus=self.app.tv and i == 0))
-        try:
-            self.body.update()
-        except Exception:
-            pass
+            cards.append(self.make_card(it, i, autofocus=self.app.tv and i == 0))
+        self.add_cards(cards)
+        self.want(0)
+        self.flush()

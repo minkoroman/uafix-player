@@ -100,6 +100,29 @@ async def run_fast(fn, *args):
 
 
 _slots = None
+
+
+class _Lifo:
+    """Обмежена кількість одночасних пошуків, але НОВІШІ — першими: при гортанні довгого
+    розділу щойно показані картки не чекають, поки знайдуться сотні вже прогорнутих."""
+
+    def __init__(self, n):
+        self.free = n
+        self.waiting = []
+
+    async def __aenter__(self):
+        if self.free > 0:
+            self.free -= 1
+            return
+        ev = asyncio.Event()
+        self.waiting.append(ev)
+        await ev.wait()
+
+    async def __aexit__(self, *exc):
+        if self.waiting:
+            self.waiting.pop().set()  # місце — найновішому
+        else:
+            self.free += 1
 _idle = None  # asyncio.Event: встановлена — фонові пошуки постерів можуть іти
 
 
@@ -126,7 +149,7 @@ def _title_plate(title):
         alignment=ft.Alignment.CENTER, padding=10, bgcolor=T.WALL_2)
 
 
-def tmdb_poster(page, item, width, on_meta=None, meta=True):
+def tmdb_poster(page, item, width, on_meta=None, meta=True, lazy=False):
     """Вертикальний постер TMDB: з кешу одразу, інакше — один пошук (укр. назва, потім
     оригінальна), з якого заразом рейтинг і жанри (on_meta(rating, genres, late))."""
     global _slots
@@ -136,7 +159,10 @@ def tmdb_poster(page, item, width, on_meta=None, meta=True):
 
     def put(src):
         if src:
+            # декодувати постер під розмір картки (а не 342×513): у довгому розділі сотні
+            # постерів — на ТВ інакше пам'ять закінчувалась
             box.content = ft.Image(src=src, fit=ft.BoxFit.COVER, gapless_playback=True,
+                                   cache_width=int(width * 2),
                                    width=width, height=h,
                                    error_content=_title_plate(item.get("title")))
 
@@ -154,7 +180,7 @@ def tmdb_poster(page, item, width, on_meta=None, meta=True):
     if not tmdb.enabled() or not item.get("url"):
         return box
     if _slots is None:
-        _slots = asyncio.Semaphore(3 if T.TV else 6)  # ТВ: не забирати всі потоки
+        _slots = _Lifo(3 if T.TV else 6)  # ТВ: не забирати всі потоки
 
     async def look():
         import core
@@ -176,13 +202,18 @@ def tmdb_poster(page, item, width, on_meta=None, meta=True):
                         await _idle.wait()
                     m = await asyncio.wait_for(asyncio.to_thread(
                         tmdb.meta, item["url"], item.get("title", ""), item.get("orig", ""),
-                        item.get("year", ""), core.site_meta), 15)
+                        item.get("year", ""),
+                        # за кордоном сторінка сайту йде через Tor — для картки це задовго
+                        None if core.GEO["site"] else core.site_meta), 15)
                     if m and (m["rating"] or m["genres"]):
                         on_meta(m["rating"], m["genres"], True)
         except Exception:
             pass
 
-    page.run_task(look)
+    if lazy:  # пошук — коли картка буде біля екрана (box.start(), див. catalog.Grid)
+        box.start = lambda: (page.run_task(look), setattr(box, "start", lambda: None))
+    else:
+        page.run_task(look)
     return box
 
 
@@ -208,7 +239,8 @@ async def _prefetch_later(url, n):
         pass
 
 
-def poster_card(page, item, on_open, width, meta=True, autofocus=False, on_focus=None):
+def poster_card(page, item, on_open, width, meta=True, autofocus=False, on_focus=None,
+                lazy=False):
     """Афіша: вертикальний постер TMDB, під ним назва й «★ 7.6 · Драма». Вибрана — рамка
     навколо постера й назва табличкою."""
     title = ft.Text(item.get("title") or "", size=T.S_SMALL + 1, weight=ft.FontWeight.W_700,
@@ -246,7 +278,8 @@ def poster_card(page, item, on_open, width, meta=True, autofocus=False, on_focus
     put_year()
     badges = ft.Column([age, year], spacing=4, tight=True,
                        horizontal_alignment=ft.CrossAxisAlignment.START, left=6, top=6)
-    pic = ft.Stack([tmdb_poster(page, item, width, show, meta), badges],
+    poster_box = tmdb_poster(page, item, width, show, meta, lazy)
+    pic = ft.Stack([poster_box, badges],
                    width=width, height=width / RATIO)
     # вибрана: світла рамка лише навколо постера, назва засвічується табличкою табло.
     # Рамка й табличка є завжди (прозорі) — щоб у фокусі нічого не зсувалось.
@@ -259,6 +292,7 @@ def poster_card(page, item, on_open, width, meta=True, autofocus=False, on_focus
         padding=ft.Padding.only(top=5))],
         spacing=0, width=width + 6, tight=True)
     url = item.get("url")
+    start = getattr(poster_box, "start", None)
     state = {"on": False}
 
     def light(on):
@@ -278,7 +312,7 @@ def poster_card(page, item, on_open, width, meta=True, autofocus=False, on_focus
         quiet()
         light(on)
         _want(page, url, on)
-    return ft.Button(
+    btn = ft.Button(
         content=body, on_click=_click(lambda e: on_open(item)), autofocus=autofocus,
         on_focus=lambda e: (quiet(), light(True), _want(page, url, True),
                             on_focus and on_focus(True)),
@@ -289,6 +323,8 @@ def poster_card(page, item, on_open, width, meta=True, autofocus=False, on_focus
             overlay_color=ft.Colors.TRANSPARENT, shadow_color=ft.Colors.TRANSPARENT,
             side=ft.BorderSide(0, ft.Colors.TRANSPARENT),
             shape=ft.RoundedRectangleBorder(radius=5), animation_duration=0))
+    btn.start = (lambda: poster_box.start()) if start else (lambda: None)
+    return btn
 
 
 def board(rows, label_text=None):

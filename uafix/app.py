@@ -70,6 +70,7 @@ class App:
         page.on_route_change = lambda e: (kit.quiet(), self.handle_link(e.route))
         page.on_keyboard_event = self.on_key
         page.on_app_lifecycle_state_change = self.on_lifecycle
+        page.on_resize = self.on_resize
         await self.store.load()
         core.ABROAD["enabled"] = bool(self.store.settings.get("abroad", True))
         core.ABROAD["get_proxy"] = self.tor_proxy
@@ -199,19 +200,23 @@ class App:
             self.rail_focus.discard(key)
         self.page.run_task(self._rail_settle)
 
-    def _fell_into_rail(self):
-        return (getattr(self, "zone", "") == "content" and self.rail_focus
-                and getattr(self, "last_vkey", 0) > time.monotonic() - 0.5
-                and getattr(self, "content_rebuild", None) is not None)
-
     async def _rail_settle(self):
         await asyncio.sleep(0.05)  # перехід між пунктами меню: blur одного, focus іншого
-        if self._fell_into_rail():
-            self.last_vkey = 0
-            target = self.content_rebuild()
-            if target is not None:
-                await self.keep_focus(target)
-                return
+        if getattr(self, "zone", "") == "content" and self.rail_focus \
+                and getattr(self, "content_rebuild", None) is not None:
+            # фокус зі вмісту потрапив у меню. Пускаємо лише стрілку вліво. На ТВ подія
+            # клавіші приходить ПІСЛЯ зміни фокусу — трохи чекаємо на неї
+            since = time.monotonic() - 0.4
+            for _ in range(8):
+                if getattr(self, "last_arrow_at", 0) >= since:
+                    break
+                await asyncio.sleep(0.04)
+            if getattr(self, "last_arrow", "") != "Arrow Left":
+                self.last_arrow = ""
+                target = self.content_rebuild()
+                if target is not None:
+                    await self.keep_focus(target)
+                    return
         if self.rail_focus:
             self.zone = "rail"
         open_ = bool(self.rail_focus)
@@ -338,6 +343,16 @@ class App:
             ft.Text(message, color=T.LETTER, weight=ft.FontWeight.W_600),
             bgcolor=T.SIGNAL if error else T.BOARD, duration=ft.Duration(seconds=4)))
 
+    def on_resize(self, e):
+        """Ширина вікна змінилась — сітки розділів перекладають картки по рядах."""
+        kit.quiet()
+        screen = self.screens.get(self.section)
+        if hasattr(screen, "relayout"):
+            before = screen.per
+            screen.relayout()
+            if screen.per != before:
+                screen.flush()
+
     def on_lifecycle(self, e):
         """Телефон: застосунок пішов у фон / закрили плаваюче вікно — пауза (у самому плаваючому
         вікні застосунок лише «неактивний», і відео грає далі). ТВ: заставка чи кнопка «Додому»
@@ -358,10 +373,8 @@ class App:
 
     async def on_key(self, e: ft.KeyboardEvent):
         kit.quiet()
-        if e.key in ("Arrow Up", "Arrow Down"):
-            self.last_vkey = time.monotonic()
-            if self.tv and self.rail_focus and getattr(self, "zone", "") == "content":
-                self.page.run_task(self._rail_settle)  # подія клавіші прийшла після фокусу
+        if e.key.startswith("Arrow "):
+            self.last_arrow, self.last_arrow_at = e.key, time.monotonic()
         if self.tv and self.rail_focus and e.key in ("Arrow Up", "Arrow Down") \
                 and getattr(self, "zone", "") == "rail":
             # краї меню: Flutter шукає «найближче» вище / нижче й перескакував праворуч у вміст
