@@ -39,6 +39,8 @@ class Player:
         self.dur = 0
         self.last = (0, 0)  # остання відома (позиція, тривалість) — зберегти при виході
         self.ended = False
+        self.tvp = None           # ТВ: панель плеєра (TVPanel)
+        self.no_autonext = False  # ТВ: «Скасувати» на картці наступної серії
         self.reopening = False
         self.mini_on = False      # ПК: маленьке вікно поверх інших
         self.mini_saved = None
@@ -176,8 +178,11 @@ class Player:
             self.overlay.opacity = 0  # ticker не оновлює нашої (відсутньої) панелі
             stack = ft.Stack([self.video, self.mini_drag, self.mini_btn], expand=True)
         else:
-            stack = ft.Stack([self.video, self.overlay, self.mini_drag, self.mini_btn],
-                             expand=True)
+            # телевізор — панель як у 1.x (uafix/tvplayer.py)
+            from .tvplayer import TVPanel
+            self.tvp = TVPanel(self, season if what else "", what)
+            self.overlay.opacity = 0  # ticker не оновлює старої панелі
+            stack = ft.Stack([self.video, *self.tvp.build()], expand=True)
         self.view = self.app.push("/play", stack, bgcolor="#000000")
         self.view.on_close = self.close
         self.app.key_handler = self.on_key
@@ -376,6 +381,9 @@ class Player:
         """Панель видна: кнопки на місці (схована — їх немає зовсім, щоб не натиснути
         невидиму). overlay.opacity — лише позначка «видно / ні»."""
         self.shown_at = time.monotonic()
+        if self.tvp is not None:
+            self.tvp.activity(focus)
+            return
         if not self.app.tv:
             return  # телефон і ПК: панель вбудована в плеєр, нашої на екрані нема
         if self.overlay.opacity != 1:
@@ -386,7 +394,7 @@ class Player:
                 self.app.page.run_task(self.play_btn.focus)
 
     def hide_overlay(self):
-        if not self.app.tv:
+        if not self.app.tv or self.tvp is not None:
             return
         if self.overlay.opacity != 0:
             self.overlay.opacity = 0
@@ -444,7 +452,8 @@ class Player:
             # кінець серії (подія on_complete у плеєрі спрацьовує й передчасно)
             if dur > 60000 and pos >= dur - 1500 and not playing and not self.ended:
                 self.ended = True
-                await self.next_episode()
+                if self.tvp is None or self.tvp.at_end():
+                    await self.next_episode()
                 return
             self.pip(playing)  # сам відсіює повтори; раніше вмикався лише після паузи
             if self.paused == playing:
@@ -543,14 +552,14 @@ class Player:
     def choose(self, title, options, current, on_pick):
         """Вікно з варіантами (плашками): вибір — явно, одним натисканням."""
         def pick(value):
-            self.dialog_open = False
             self.app.page.pop_dialog()
+            self._dialog_done()
             if value != current:
                 on_pick(value)
 
         self.dialog_open = True
         self.app.page.show_dialog(ft.AlertDialog(
-            on_dismiss=lambda e: setattr(self, "dialog_open", False),
+            on_dismiss=lambda e: self._dialog_done(),
             bgcolor="#1C1815", shape=ft.RoundedRectangleBorder(radius=4),
             title=T.caps(title, size=T.S_HEAD, color="#F1E6CC"),
             content=ft.Column([self.choice_plate(name, lambda e, v=v: pick(v), v == current)
@@ -645,6 +654,9 @@ class Player:
 
     async def pause(self):
         """Пауза, якщо грає (застосунок пішов у фон)."""
+        if self.tvp is not None:
+            await self.tvp.pause()
+            return
         try:
             if await self.video.is_playing():
                 await self.video.pause()
@@ -659,6 +671,37 @@ class Player:
             return
         await self.video.seek(max(0, int(pos + seconds * 1000)))
         self.show_overlay(False)
+
+    def _dialog_done(self):
+        self.dialog_open = False
+        if self.tvp is not None:
+            self.tvp.dialog_closed()
+
+    def has_prev(self):
+        return self.ei > 0 or self.si > 0
+
+    async def prev_episode(self):
+        if not self.has_prev():
+            return
+        if self.ei > 0:
+            si, ei = self.si, self.ei - 1
+        else:
+            si = self.si - 1
+            ei = max(0, len(self.title.seasons[si]["episodes"]) - 1)
+        self.app.back()
+        await self.title.play(si, ei, 0)
+
+    def next_label(self):
+        if not self.has_next():
+            return ""
+        eps = self.title.seasons[self.si]["episodes"]
+        si, ei = (self.si, self.ei + 1) if self.ei + 1 < len(eps) else (self.si + 1, 0)
+        try:
+            ep = self.title.seasons[si]["episodes"][ei]
+        except IndexError:
+            return ""
+        season = self.title.seasons[si]["name"] if si != self.si else ""
+        return " · ".join(x for x in (season, ep["label"]) if x)
 
     def has_next(self):
         eps = self.title.seasons[self.si]["episodes"]
@@ -733,6 +776,13 @@ class Player:
     async def on_key(self, key):
         if getattr(self, "dialog_open", False):
             return key in BACK_KEYS  # Escape закриває вікно вибору, а не плеєр
+        if self.tvp is not None:
+            if await self.tvp.on_key(key, BACK_KEYS, OK_KEYS):
+                return True
+            if key in BACK_KEYS:
+                self.app.back()
+                return True
+            return False
         if key in BACK_KEYS:
             if not self.app.tv and not self.app.mobile and self.app.page.window.full_screen:
                 self.fullscreen(False)  # Escape — спершу вийти з повного екрана
