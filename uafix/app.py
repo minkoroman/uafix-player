@@ -295,6 +295,15 @@ class App:
         view = ft.View(route=route, controls=[ft.SafeArea(control, expand=True)
                                               if self.mobile else control],
                        padding=0, bgcolor=bgcolor or T.FACADE)
+        if self.android:
+            # Android: системне «Назад» спершу обробляємо самі (як у 1.x). Інакше Flet одразу
+            # закривав увесь екран — навіть коли поверх відкрите вікно вибору чи панель
+            # плеєра; відкрите вікно Android закриває сам (воно — верхній маршрут)
+            async def confirm(e, v=view):
+                await v.confirm_pop(False)
+                if self.page.views and self.page.views[-1] is v:
+                    self.system_back()
+            view.can_pop, view.on_confirm_pop = False, confirm
         self.page.views.append(view)
         self.page.update()
         return view
