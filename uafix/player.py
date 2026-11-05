@@ -93,16 +93,16 @@ class Player:
                                  on_change_start=self.scrub_start, on_change=self.scrub_move,
                                  on_change_end=self.scrub_end)
             bar_box = ft.Container(self.bar, height=18)
-        self.play_btn = kit.plate(ft.Icon(ft.Icons.PAUSE_ROUNDED, size=28),
+        self.play_btn = kit.plate(ft.Icon(ft.Icons.PAUSE_ROUNDED, size=40),
                                   on_click=lambda e: self.app.page.run_task(self.toggle),
-                                  kind="glass", pad=(18, 12))
+                                  kind="glass", pad=(22, 18), radius=40)
         buttons = [
-            kit.plate(ft.Icon(ft.Icons.REPLAY_10_ROUNDED, size=26),
-                      on_click=lambda e: self.app.page.run_task(self.seek_by, -10), pad=(14, 12),
+            kit.plate(ft.Icon(ft.Icons.REPLAY_10_ROUNDED, size=30),
+                      on_click=lambda e: self.app.page.run_task(self.seek_by, -10), pad=(16, 14),
                       kind="glass"),
             self.play_btn,
-            kit.plate(ft.Icon(ft.Icons.FORWARD_30_ROUNDED, size=26),
-                      on_click=lambda e: self.app.page.run_task(self.seek_by, 30), pad=(14, 12),
+            kit.plate(ft.Icon(ft.Icons.FORWARD_10_ROUNDED, size=30),
+                      on_click=lambda e: self.app.page.run_task(self.seek_by, 10), pad=(16, 14),
                       kind="glass"),
         ]
         if self.has_next():
@@ -123,14 +123,14 @@ class Player:
             gradient=ft.LinearGradient(begin=ft.Alignment.TOP_CENTER,
                                        end=ft.Alignment.BOTTOM_CENTER,
                                        colors=["#CC000000", "#00000000"]))
+        # як на телефоні й ПК: −10 / ▶ / +10 — посередині кадру; знизу — час і кнопки,
+        # смужка — у самому низу
+        self.primary = ft.Row(buttons, spacing=28, alignment=ft.MainAxisAlignment.CENTER,
+                              vertical_alignment=ft.CrossAxisAlignment.CENTER)
         bottom = ft.Container(ft.Column([
-            bar_box,
-            # телефон: кнопки переносяться рядками (вертикально всі в один ряд не влазили)
-            ft.Row([ft.Row(buttons, spacing=10, wrap=self.app.mobile, run_spacing=8),
-                    ft.Row(options + [self.time_text], spacing=10, wrap=self.app.mobile,
-                           run_spacing=8)],
-                   alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=self.app.mobile,
-                   run_spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER)], spacing=14),
+            ft.Row([self.time_text, ft.Container(expand=True), ft.Row(options, spacing=10)],
+                   vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            bar_box], spacing=12),
             padding=ft.Padding.only(left=self.app.side, right=self.app.side, top=50, bottom=26),
             gradient=ft.LinearGradient(begin=ft.Alignment.BOTTOM_CENTER,
                                        end=ft.Alignment.TOP_CENTER,
@@ -143,7 +143,7 @@ class Player:
             border_radius=48, bgcolor="#99000000", alignment=ft.Alignment.CENTER, visible=False)
         self.paused = False
         middle = ft.GestureDetector(
-            ft.Container(self.center_icon, expand=True, bgcolor="#01000000",
+            ft.Container(self.primary, expand=True, bgcolor="#01000000",
                          alignment=ft.Alignment.CENTER),
             on_tap=lambda e: (kit.quiet(), self.app.page.run_task(self.tap_center)),
             on_hover=lambda e: (kit.quiet(), self.show_overlay(False)), expand=True)
@@ -151,6 +151,7 @@ class Player:
         self.panel_focus = False
         if self.app.tv:
             self._track_panel_focus(top)
+            self._track_panel_focus(self.primary)
             self._track_panel_focus(bottom)
         # шари стопки — прив'язані до країв (без цього панель не мала розміру й не малювалась)
         self.overlay = ft.Container(ft.Column([top, middle, bottom], spacing=0),
@@ -166,12 +167,14 @@ class Player:
                           style=ft.ButtonStyle(bgcolor="#99000000", padding=0,
                                                shape=ft.CircleBorder())),
             right=10, top=10, visible=False)
-        if self.app.mobile:
-            # телефон — як у 1.x: вбудована мобільна панель плеєра (подвійний тап ліворуч /
-            # праворуч — ±10 с, тап і перетягування по смужці, повний екран з поворотом)
-            self.video.controls = self.phone_controls(season if what else "", what)
+        if not self.app.tv:
+            # телефон і ПК — як у 1.x: вбудована панель плеєра в кольорах редизайну
+            # (телефон: подвійний тап ліворуч / праворуч — ±10 с; тап і перетягування по
+            # смужці; ПК: клік — пауза)
+            self.builtin = self.builtin_controls(season if what else "", what)
+            self.video.controls = self.builtin
             self.overlay.opacity = 0  # ticker не оновлює нашої (відсутньої) панелі
-            stack = ft.Stack([self.video], expand=True)
+            stack = ft.Stack([self.video, self.mini_drag, self.mini_btn], expand=True)
         else:
             stack = ft.Stack([self.video, self.overlay, self.mini_drag, self.mini_btn],
                              expand=True)
@@ -188,7 +191,7 @@ class Player:
             self.mini_on = True
             self.mini_btn.visible = self.mini_drag.visible = True
             self.video.fit = ft.BoxFit.COVER
-            self.top.visible = self.bottom.visible = False
+            self.video.controls = None
 
     # ── перемотка мишкою по смужці
     def scrub_start(self, e):
@@ -248,52 +251,72 @@ class Player:
             except Exception:
                 pass
 
-    def phone_controls(self, season, what):
-        """Панель плеєра на телефоні (як у 1.x) — та сама вертикально й горизонтально."""
+    def builtin_controls(self, season, what):
+        """Вбудована панель плеєра для телефона й ПК (як у 1.x), у кольорах редизайну."""
+        ivory = "#F1E6CC"
+        phone = self.app.mobile
+
         def btn(icon, tip, action, size=26):
-            return ft.IconButton(icon, icon_color="#FFFFFF", icon_size=size, tooltip=tip,
+            return ft.IconButton(icon, icon_color=ivory, icon_size=size, tooltip=tip,
                                  on_click=lambda e: (kit.quiet(), action()))
         run = self.app.page.run_task
-        primary = [btn(ft.Icons.REPLAY_10_ROUNDED, "Назад на 10 с",
-                       lambda: run(self.seek_by, -10), 36), ft.Container(width=20),
-                   fv.VideoPlayOrPauseButton(icon_size=56), ft.Container(width=20),
-                   btn(ft.Icons.FORWARD_10_ROUNDED, "Вперед на 10 с",
-                       lambda: run(self.seek_by, 10), 36)]
-        if self.has_next():
-            primary += [ft.Container(width=12),
-                        btn(ft.Icons.SKIP_NEXT_ROUNDED, "Наступна серія",
-                            lambda: run(self.next_episode), 32)]
-        bottom = [fv.VideoPositionIndicator(), fv.VideoSpacer()]
+        nxt = [btn(ft.Icons.SKIP_NEXT_ROUNDED, "Наступна серія",
+                   lambda: run(self.next_episode), 32 if phone else 26)] if self.has_next() else []
+        opts = []
         if len(set(self.voices())) > 1:
-            bottom.append(btn(ft.Icons.RECORD_VOICE_OVER_ROUNDED, "Озвучка", self.choose_voice))
+            opts.append(btn(ft.Icons.RECORD_VOICE_OVER_ROUNDED, "Озвучка", self.choose_voice))
         if self.subs():
-            bottom.append(btn(ft.Icons.SUBTITLES_ROUNDED, "Субтитри", self.choose_subs))
-        bottom.append(btn(ft.Icons.TUNE_ROUNDED, "Якість і масштаб", self.choose_more))
+            opts.append(btn(ft.Icons.SUBTITLES_ROUNDED, "Субтитри", self.choose_subs))
+        opts.append(btn(ft.Icons.TUNE_ROUNDED, "Якість і масштаб", self.choose_more))
         from .casting import Casting
         self.casting = Casting(self)
-        bottom += [btn(ft.Icons.CAST_ROUNDED, "Транслювати на телевізор",
-                       lambda: run(self.casting.open)), fv.VideoFullscreenButton()]
+        opts.append(btn(ft.Icons.CAST_ROUNDED, "Транслювати на телевізор",
+                        lambda: run(self.casting.open)))
         kick = " · ".join(x for x in (season, what, self.voice) if x)
         top = [btn(ft.Icons.ARROW_BACK_ROUNDED, "Назад", self.app.back),
                ft.Column([ft.Text(kick.upper(), size=T.S_SMALL - 1, color="#B8AC95",
                                   weight=ft.FontWeight.W_700, max_lines=1),
                           ft.Text(self.title.info.get("title") or self.title.item["title"],
-                                  size=T.S_HEAD, weight=ft.FontWeight.W_800, color="#F1E6CC",
+                                  size=T.S_HEAD, weight=ft.FontWeight.W_800, color=ivory,
                                   max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)],
                          spacing=2, tight=True, expand=True)]
-        return fv.MaterialVideoControls(
-            seek_on_double_tap=True,
-            seek_on_double_tap_backward_duration=ft.Duration(seconds=10),
-            seek_on_double_tap_forward_duration=ft.Duration(seconds=10),
-            automatically_imply_skip_next_button=False,
-            automatically_imply_skip_previous_button=False,
-            seek_bar_position_color=T.SIGNAL, seek_bar_thumb_color=T.SIGNAL,
-            seek_bar_margin=ft.Padding.only(left=24, right=24, bottom=18),
-            top_button_bar=top, primary_button_bar=primary, bottom_button_bar=bottom,
-            bottom_button_bar_margin=ft.Padding.only(left=8, right=8, bottom=22))
+        common = dict(automatically_imply_skip_next_button=False,
+                      automatically_imply_skip_previous_button=False,
+                      seek_bar_position_color=T.SIGNAL, seek_bar_thumb_color=T.SIGNAL,
+                      seek_bar_color="#33F1E6CC", button_bar_button_color=ivory,
+                      top_button_bar=top)
+        if phone:
+            primary = [btn(ft.Icons.REPLAY_10_ROUNDED, "Назад на 10 с",
+                           lambda: run(self.seek_by, -10), 36), ft.Container(width=20),
+                       fv.VideoPlayOrPauseButton(icon_size=56), ft.Container(width=20),
+                       btn(ft.Icons.FORWARD_10_ROUNDED, "Вперед на 10 с",
+                           lambda: run(self.seek_by, 10), 36)]
+            if nxt:
+                primary += [ft.Container(width=12)] + nxt
+            return fv.MaterialVideoControls(
+                seek_on_double_tap=True,
+                seek_on_double_tap_backward_duration=ft.Duration(seconds=10),
+                seek_on_double_tap_forward_duration=ft.Duration(seconds=10),
+                seek_bar_margin=ft.Padding.only(left=24, right=24, bottom=18),
+                primary_button_bar=primary,
+                bottom_button_bar=[fv.VideoPositionIndicator(), fv.VideoSpacer(), *opts,
+                                   fv.VideoFullscreenButton()],
+                bottom_button_bar_margin=ft.Padding.only(left=8, right=8, bottom=22), **common)
+        # ПК: на весь екран — саме вікно (вбудований повноекранний режим ховав застосунок)
+        bottom = [btn(ft.Icons.REPLAY_10_ROUNDED, "Назад на 10 с", lambda: run(self.seek_by, -10)),
+                  fv.VideoPlayOrPauseButton(),
+                  btn(ft.Icons.FORWARD_10_ROUNDED, "Вперед на 10 с", lambda: run(self.seek_by, 10)),
+                  *nxt, fv.VideoVolumeButton(), fv.VideoPositionIndicator(), fv.VideoSpacer(),
+                  *opts,
+                  btn(ft.Icons.PICTURE_IN_PICTURE_ALT_ROUNDED, "Міні-плеєр",
+                      lambda: run(self.toggle_mini)),
+                  btn(ft.Icons.FULLSCREEN_ROUNDED, "На весь екран (F)", self.fullscreen)]
+        return fv.MaterialDesktopVideoControls(
+            play_and_pause_on_tap=True, toggle_fullscreen_on_double_press=False,
+            hide_mouse_on_controls_removal=True, bottom_button_bar=bottom, **common)
 
     def choose_more(self):
-        """Телефон: якість і масштаб — одним вікном (окремими кнопками не вміщалось)."""
+        """Якість і масштаб — одним вікном (окремими кнопками не вміщалось)."""
         variants = core._VARIANTS.get(self.entry["url"]) or {}
         opts = []
         if len(variants) > 1:
@@ -353,21 +376,21 @@ class Player:
         """Панель видна: кнопки на місці (схована — їх немає зовсім, щоб не натиснути
         невидиму). overlay.opacity — лише позначка «видно / ні»."""
         self.shown_at = time.monotonic()
-        if self.app.mobile:
-            return  # телефон: панель вбудована в плеєр, нашої на екрані нема
+        if not self.app.tv:
+            return  # телефон і ПК: панель вбудована в плеєр, нашої на екрані нема
         if self.overlay.opacity != 1:
             self.overlay.opacity = 1
-            self.top.visible = self.bottom.visible = not self.mini_on
+            self.top.visible = self.bottom.visible = self.primary.visible = not self.mini_on
             self.overlay.update()
             if focus and self.app.tv:
                 self.app.page.run_task(self.play_btn.focus)
 
     def hide_overlay(self):
-        if self.app.mobile:
+        if not self.app.tv:
             return
         if self.overlay.opacity != 0:
             self.overlay.opacity = 0
-            self.top.visible = self.bottom.visible = False
+            self.top.visible = self.bottom.visible = self.primary.visible = False
             self.panel_focus = False  # схована кнопка фокус уже не тримає
             self.overlay.update()
 
@@ -520,11 +543,14 @@ class Player:
     def choose(self, title, options, current, on_pick):
         """Вікно з варіантами (плашками): вибір — явно, одним натисканням."""
         def pick(value):
+            self.dialog_open = False
             self.app.page.pop_dialog()
             if value != current:
                 on_pick(value)
 
+        self.dialog_open = True
         self.app.page.show_dialog(ft.AlertDialog(
+            on_dismiss=lambda e: setattr(self, "dialog_open", False),
             bgcolor="#1C1815", shape=ft.RoundedRectangleBorder(radius=4),
             title=T.caps(title, size=T.S_HEAD, color="#F1E6CC"),
             content=ft.Column([self.choice_plate(name, lambda e, v=v: pick(v), v == current)
@@ -672,6 +698,7 @@ class Player:
             w.left, w.top = ax + aw - mw - 16, ay + 16
             w.always_on_top = True
             self.video.fit = ft.BoxFit.COVER   # кадр заповнює віконце, без чорних полів
+            self.video.controls = None         # віконце — лише кадр (і кнопка «розгорнути»)
             self.mini_on = True
         else:
             sv = self.mini_saved or {}
@@ -679,12 +706,14 @@ class Player:
             w.title_bar_hidden = False
             w.title_bar_buttons_hidden = False
             self.video.fit = self.fit_mode()
+            self.video.controls = getattr(self, "builtin", None)
             for k, v in sv.items():
                 if v is not None:
                     setattr(w, k, v)
             self.mini_on = False
         self.mini_btn.visible = self.mini_drag.visible = self.mini_on
-        self.top.visible = self.bottom.visible = not self.mini_on and self.overlay.opacity == 1
+        if self.app.tv:
+            self.top.visible = self.bottom.visible = not self.mini_on and self.overlay.opacity == 1
         self.app.page.update()
 
     def pip(self, playing):
@@ -702,6 +731,8 @@ class Player:
         self.app.page.update()
 
     async def on_key(self, key):
+        if getattr(self, "dialog_open", False):
+            return key in BACK_KEYS  # Escape закриває вікно вибору, а не плеєр
         if key in BACK_KEYS:
             if not self.app.tv and not self.app.mobile and self.app.page.window.full_screen:
                 self.fullscreen(False)  # Escape — спершу вийти з повного екрана
@@ -711,6 +742,9 @@ class Player:
         if key.upper() == "F" and not self.app.tv and not self.app.mobile:
             self.fullscreen()
             return True
+        if not self.app.tv and not self.app.mobile and \
+                key.startswith(("Arrow", "Space", " ", "Enter")):
+            return False  # ПК: пробіл і стрілки — у вбудованій панелі плеєра (інакше двічі)
         if key in ("Media Fast Forward", "Media Rewind"):
             await self.seek_by(30 if key == "Media Fast Forward" else -10)
             return True
