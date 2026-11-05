@@ -357,19 +357,20 @@ class TVPanel:
         return not getattr(self.p, "no_autonext", False)
 
     # ── пульт
+    def back(self):
+        """«Назад»: картка наступної серії — «Скасувати»; видно панель — сховати.
+        True — оброблено (інакше — вихід з плеєра)."""
+        if self.next_shown:
+            self.cancel_next()
+            return True
+        if self.shown:
+            self.hide_token += 1
+            self.hide()
+            return True
+        return False
+
     async def on_key(self, key, back_keys, ok_keys):
         """True — оброблено тут."""
-        if key in back_keys:
-            if self.dialog:
-                return True
-            if self.next_shown:
-                self.cancel_next()
-                return True
-            if self.shown:
-                self.hide_token += 1
-                self.hide()
-                return True
-            return False  # схована панель — «Назад» виходить з плеєра
         if key in QUIET_KEYS:
             return True
         was_hidden = not self.shown

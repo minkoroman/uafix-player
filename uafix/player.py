@@ -773,22 +773,38 @@ class Player:
         w.full_screen = (not w.full_screen) if on is None else on
         self.app.page.update()
 
+    def handle_back(self):
+        """«Назад»: відкрите вікно вибору — закрити його; ТВ — картка наступної серії чи
+        панель; True — оброблено (з фільму не виходимо). Клавіша й системний «Назад»
+        часто приходять обидва — другий за 0,5 с ігноруємо."""
+        now = time.monotonic()
+        if now - getattr(self, "_back_at", 0) < 0.5:
+            return True
+        if getattr(self, "dialog_open", False) or (self.tvp is not None and self.tvp.dialog):
+            self._back_at = now
+            try:
+                self.app.page.pop_dialog()
+            except Exception:
+                pass
+            self._dialog_done()
+            return True
+        if self.tvp is not None and self.tvp.back():
+            self._back_at = now
+            return True
+        return False
+
     async def on_key(self, key):
-        if getattr(self, "dialog_open", False):
-            return key in BACK_KEYS  # Escape закриває вікно вибору, а не плеєр
-        if self.tvp is not None:
-            if await self.tvp.on_key(key, BACK_KEYS, OK_KEYS):
-                return True
-            if key in BACK_KEYS:
-                self.app.back()
-                return True
-            return False
         if key in BACK_KEYS:
+            if self.handle_back():
+                return True
             if not self.app.tv and not self.app.mobile and self.app.page.window.full_screen:
                 self.fullscreen(False)  # Escape — спершу вийти з повного екрана
                 return True
+            self._back_at = time.monotonic()
             self.app.back()
             return True
+        if self.tvp is not None:
+            return await self.tvp.on_key(key, BACK_KEYS, OK_KEYS)
         if key.upper() == "F" and not self.app.tv and not self.app.mobile:
             self.fullscreen()
             return True

@@ -69,7 +69,7 @@ class App:
                 await page.window.center()
             except Exception:
                 pass
-        page.on_view_pop = lambda e: self.back()
+        page.on_view_pop = lambda e: self.system_back()
         page.on_route_change = lambda e: (kit.quiet(), self.handle_link(e.route))
         page.on_keyboard_event = self.on_key
         page.on_app_lifecycle_state_change = self.on_lifecycle
@@ -298,6 +298,16 @@ class App:
         self.page.views.append(view)
         self.page.update()
         return view
+
+    def system_back(self):
+        """«Назад» системи (Android / пульт ТВ) — спершу плеєру: закрити вікно вибору чи
+        сховати панель, і лише потім вийти з фільму (як у 1.x)."""
+        kit.quiet()
+        p = self.player
+        if p is not None and p.alive and self.page.views and \
+                self.page.views[-1].route == "/play" and p.handle_back():
+            return
+        self.back()
 
     def back(self):
         kit.quiet()
