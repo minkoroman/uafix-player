@@ -175,6 +175,9 @@ class Player:
             # смужці; ПК: клік — пауза)
             self.builtin = self.builtin_controls(season if what else "", what)
             self.video.controls = self.builtin
+            if self.app.mobile:
+                self.video.on_exit_fullscreen = self.exit_fullscreen
+                self.video.on_enter_fullscreen = lambda e: setattr(self, "portrait_lock", False)
             self.overlay.opacity = 0  # ticker не оновлює нашої (відсутньої) панелі
             stack = ft.Stack([self.video, self.mini_drag, self.mini_btn], expand=True)
         else:
@@ -236,16 +239,38 @@ class Player:
         return bool(p.width and p.height and p.width > p.height)
 
     def immersive(self, on):
-        if self.app.mobile and self.app.android and getattr(self, "_immersive", None) != on:
+        if self.app.mobile and self.app.android and getattr(self, "_immersive", None) != on \
+                and not self.in_pip():
             self._immersive = on
             self.app.page.run_task(ft.UrlLauncher().launch_url,
                                    f"{CTRL}://immersive?on={1 if on else 0}",
                                    mode=ft.LaunchMode.EXTERNAL_APPLICATION)
 
+    def exit_fullscreen(self, e=None):
+        """Телефон: вийшли з повного екрана кнопкою — інтерфейс вертикально (як у 1.x), хоч
+        телефон ще в руках горизонтально; поворот знову вільний, коли плеєр закриють."""
+        kit.quiet()
+        self.portrait_lock = True
+        self.app.page.run_task(self._portrait)
+
+    async def _portrait(self):
+        await asyncio.sleep(0.3)  # після того, як плеєр сам зніме свої обмеження повороту
+        if self.alive and self.portrait_lock:
+            await self.app.page.set_allowed_device_orientations(
+                [ft.DeviceOrientation.PORTRAIT_UP])
+
+    def in_pip(self):
+        """Плаваюче віконце (PiP) або застосунок у фоні: нічого не запускати — запуск
+        службового посилання розгортав віконце назад на весь екран."""
+        p = self.app.page
+        small = bool(p.width and p.height and p.width < 500 and p.height < 400)
+        return small or getattr(self.app, "app_state", None) not in (
+            None, ft.AppLifecycleState.RESUME, ft.AppLifecycleState.SHOW)
+
     def on_resize(self):
         """Повернули телефон: горизонтально — повний екран і обраний масштаб, вертикально —
         системні панелі назад і кадр цілком."""
-        if not self.app.mobile or not self.alive:
+        if not self.app.mobile or not self.alive or self.in_pip():
             return
         land = self.landscape()
         self.immersive(land)
@@ -558,20 +583,29 @@ class Player:
                 on_pick(value)
 
         self.dialog_open = True
+        h = self.app.page.height or 800
+        low = h < 560  # телефон горизонтально: нижчі рядки, і список прокручується
+        rows = [self.choice_plate(name, lambda e, v=v: pick(v), v == current, low)
+                for v, name in options]
+        need = len(rows) * (46 if low else 60)
+        room = max(140, h - (130 if low else 220))
         self.app.page.show_dialog(ft.AlertDialog(
             on_dismiss=lambda e: self._dialog_done(),
             bgcolor="#1C1815", shape=ft.RoundedRectangleBorder(radius=4),
             title=T.caps(title, size=T.S_HEAD, color="#F1E6CC"),
-            content=ft.Column([self.choice_plate(name, lambda e, v=v: pick(v), v == current)
-                               for v, name in options], tight=True, spacing=8, width=320)))
+            title_padding=ft.Padding.only(left=24, right=24, top=16, bottom=4) if low else None,
+            content_padding=ft.Padding.only(left=24, right=24, top=8, bottom=16) if low else None,
+            content=ft.Column(rows, tight=True, spacing=6 if low else 8, width=320,
+                              scroll=ft.ScrollMode.AUTO if need > room else None,
+                              height=room if need > room else None)))
 
     @staticmethod
-    def choice_plate(name, on_click, on):
+    def choice_plate(name, on_click, on, low=False):
         """Рядок у вікні вибору: на всю ширину, звичайної висоти; вибраний — з ✓."""
         btn = kit.plate(ft.Row([ft.Text(name.upper(), size=T.S_SMALL + 1, weight=ft.FontWeight.W_700,
                                         style=ft.TextStyle(letter_spacing=1.2), expand=True),
                                 ft.Icon(ft.Icons.CHECK_ROUNDED, size=20, visible=on)]),
-                        on_click=on_click, kind="glass", autofocus=on, pad=(18, 14))
+                        on_click=on_click, kind="glass", autofocus=on, pad=(18, 9 if low else 14))
         if on:  # вибране — світла плашка (на темному вікні «lit» зливався з тлом)
             btn.style.bgcolor = {kit.CTRL.FOCUSED: "#F1E6CC", kit.CTRL.HOVERED: "#F1E6CC",
                                  kit.CTRL.DEFAULT: "#F1E6CC"}
@@ -763,6 +797,8 @@ class Player:
         """Android-телефон: «картинка в картинці» при згортанні — лише поки відео грає."""
         if not (self.app.mobile and self.app.android) or playing == self.pip_on:
             return
+        if self.in_pip():
+            return  # у віконці / у фоні — не чіпати (інакше розгорталось назад)
         self.pip_on = playing
         self.app.page.run_task(ft.UrlLauncher().launch_url,
                                f"{CTRL}://pip?on={1 if playing else 0}",
@@ -847,7 +883,8 @@ class Player:
             self.pip(False)
         if self.app.mobile:
             self.immersive(False)
-            if getattr(self, "forced_land", None) is not None and not self.reopening:
+            if not self.reopening:  # поворот знову вільний (як у системі)
+                self.portrait_lock = False
                 self.app.page.run_task(self.app.page.set_allowed_device_orientations, [])
 
         if self.last[1]:

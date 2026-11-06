@@ -279,6 +279,7 @@ class App:
             open_report(self)
             return
         self.section = key
+        name = name or next((n for n, k, _ in NAV if k == key), key)  # нижнє меню імені не дає
         if key not in self.screens:
             self.screens[key] = self.Catalog(self, name or key, key)
         screen = self.screens[key]
@@ -382,9 +383,12 @@ class App:
         вікні застосунок лише «неактивний», і відео грає далі). ТВ: заставка чи кнопка «Додому»
         — пауза, а коли повернулись — панель плеєра з фокусом на ▶."""
         kit.quiet()
+        self.app_state = e.state
         p = self.player
         if p is None or not p.alive or not (self.mobile or self.tv):
             return
+        if self.mobile and e.state == ft.AppLifecycleState.HIDE:
+            return  # телефон: «сховано» буває й у плаваючому віконці — пауза лише на PAUSE
         if e.state in (ft.AppLifecycleState.HIDE, ft.AppLifecycleState.PAUSE):
             p.suspended = True
             self.page.run_task(p.pause)

@@ -38,8 +38,17 @@ class Grid:
         return self.body
 
     # ── ряди
+    def fit_phone(self):
+        """Телефон: ширина картки — щоб у ряд ставало щонайменше 3 (без пустоти праворуч)."""
+        if not self.app.mobile or self.cards or not self.app.page.width:
+            return
+        avail = self.app.page.width - 2 * (self.app.side - 6)
+        per = max(3, int((avail + 4) // 122))
+        self.card_w = max(84, int((avail - (per - 1) * 4) / per) - 18)
+
     def relayout(self, force=False):
         """Розкласти картки по рядах (заново — якщо змінилась ширина вікна)."""
+        self.fit_phone()
         per = self.per_row()
         if per == self.per and not force:
             return
@@ -115,6 +124,7 @@ class Grid:
 
     def reset(self):
         self.cards, self.rows = [], []
+        self.fit_phone()
         self.per = self.per_row()
         self.body.controls = list(self.head)
         self.page_no = 0
