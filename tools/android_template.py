@@ -53,6 +53,7 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestHighRefreshRate()
+        refreshPlayers()
         handleInstallIntent(intent)
         // без цього Android відкидає multicast-пакети, і пошук Chromecast (mDNS) нічого не бачить
         try {
@@ -73,6 +74,7 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onResume() {
         super.onResume()
         requestHighRefreshRate()
+        refreshPlayers()
     }
 
     /** Вихід на домашній екран під час перегляду — відео в плаваюче вікно. */
@@ -94,21 +96,98 @@ class MainActivity : FlutterFragmentActivity() {
         return b.build()
     }
 
-    private fun openExternal(url: String?, title: String?) {
+    /** MIME-типи, під якими відеоплеєри оголошують підтримку посилань (регістр має значення). */
+    private val playerTypes = listOf("video/*", "application/x-mpegurl", "application/x-mpegURL",
+        "application/vnd.apple.mpegurl", "video/mp4")
+
+    /** Усі встановлені програми, що вміють відкрити відео-посилання: пакет → (назва, MIME). */
+    private fun findPlayers(): LinkedHashMap<String, Pair<String, String>> {
+        val found = LinkedHashMap<String, Pair<String, String>>()
+        val pm = packageManager
+        for (t in playerTypes) {
+            val probe = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("https://example.com/v.m3u8"), t)
+            val list = try {
+                pm.queryIntentActivities(probe, PackageManager.MATCH_ALL)
+            } catch (e: Exception) {
+                continue
+            }
+            for (ri in list) {
+                val pkg = ri.activityInfo?.packageName ?: continue
+                if (pkg == packageName || found.containsKey(pkg)) continue
+                found[pkg] = Pair(ri.loadLabel(pm).toString(), t)
+            }
+        }
+        return found
+    }
+
+    /** Зберігає список плеєрів (cache/players.json) та їхні іконки (cache/players/<пакет>.png)
+     *  для Python-частини: вона показує власне вікно вибору. */
+    private val refreshing = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun refreshPlayers() {
+        if (!refreshing.compareAndSet(false, true)) return  // одне оновлення за раз
+        Thread {
+            try {
+                val pm = packageManager
+                val dir = File(cacheDir, "players").apply { mkdirs() }
+                val arr = org.json.JSONArray()
+                val all = findPlayers()
+                dir.listFiles()?.forEach {  // іконки видалених програм
+                    if (!all.containsKey(it.nameWithoutExtension)) it.delete()
+                }
+                for ((pkg, info) in all) {
+                    arr.put(org.json.JSONObject().put("pkg", pkg).put("label", info.first)
+                        .put("mime", info.second))
+                    try {
+                        val d = pm.getApplicationIcon(pkg)
+                        val bmp = android.graphics.Bitmap.createBitmap(96, 96,
+                            android.graphics.Bitmap.Config.ARGB_8888)
+                        val canvas = android.graphics.Canvas(bmp)
+                        d.setBounds(0, 0, 96, 96)
+                        d.draw(canvas)
+                        File(dir, "$pkg.png").outputStream().use {
+                            bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                        }
+                    } catch (e: Exception) {
+                    }
+                }
+                File(cacheDir, "players.json.tmp").apply {
+                    writeText(arr.toString())
+                    renameTo(File(cacheDir, "players.json"))
+                }
+            } catch (e: Exception) {
+            } finally {
+                refreshing.set(false)
+            }
+        }.start()
+    }
+
+    private fun openExternal(url: String?, title: String?, pkg: String?) {
         if (url == null || !(url.startsWith("https://") || url.startsWith("http://"))) return
-        val view = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(Uri.parse(url), "application/x-mpegURL")
+        val players = findPlayers()
+        fun viewFor(type: String) = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(Uri.parse(url), type)
             putExtra("title", title ?: "")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        try {
-            startActivity(Intent.createChooser(view, title ?: "Відкрити в плеєрі")
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        } catch (e: Exception) {
-            try {  // без вікна вибору (на деяких телевізорах його немає)
-                startActivity(Intent(view).setDataAndType(Uri.parse(url), "video/*"))
-            } catch (e2: Exception) {
+        if (!pkg.isNullOrEmpty()) {
+            // явний запуск обраної програми — без системного вікна «Завжди / Лише раз»
+            try {
+                startActivity(viewFor(players[pkg]?.second ?: "video/*").setPackage(pkg))
+                return
+            } catch (e: Exception) {
             }
+        }
+        // програма не обрана (або не запустилась) — системний вибір з усіма знайденими плеєрами
+        try {
+            val initial = players.map { (p, info) -> viewFor(info.second).setPackage(p) }
+            val chooser = Intent.createChooser(viewFor("video/*"), title ?: "Відкрити в плеєрі")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (initial.isNotEmpty()) {
+                chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, initial.toTypedArray())
+            }
+            startActivity(chooser)
+        } catch (e: Exception) {
         }
     }
 
@@ -213,7 +292,8 @@ class MainActivity : FlutterFragmentActivity() {
             return true
         }
         if (data.host == "external") {  // «Плеєр: інша програма» — вибір плеєра (VLC, MX…)
-            openExternal(data.getQueryParameter("url"), data.getQueryParameter("title"))
+            openExternal(data.getQueryParameter("url"), data.getQueryParameter("title"),
+                         data.getQueryParameter("pkg"))
             return true
         }
         if (data.host == "tor") {  // обхід регіональних обмежень — вбудований Tor (tor_runner.py)
@@ -303,6 +383,19 @@ def copy_icon_resources(res: Path) -> None:
                 dst = res / d.name / f"tv_banner_{v}{f.suffix}"
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(f, dst)
+# які програми застосунок бачить на Android 11+ (відеоплеєри для «Плеєр: інша програма»)
+PLAYER_QUERIES = """    <queries>
+        <intent><action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" android:mimeType="video/*" /></intent>
+        <intent><action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" android:mimeType="video/*" /></intent>
+        <intent><action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" android:mimeType="application/x-mpegurl" /></intent>
+        <intent><action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" android:mimeType="application/x-mpegURL" /></intent>
+        <intent><action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" android:mimeType="application/vnd.apple.mpegurl" /></intent>
+    </queries>"""
 # «картинка в картинці» (плаваюче вікно з відео при виході з застосунку)
 ACTIVITY_NAME_ATTR = 'android:name=".MainActivity"'
 PIP_ATTRS = ('android:supportsPictureInPicture="true"\n'
@@ -339,6 +432,10 @@ def main(out_dir: str) -> None:
         sys.exit("Не знайдено MainActivity в AndroidManifest.xml — шаблон змінився")
     manifest = manifest.replace(ACTIVITY_NAME_ATTR,
                                 ACTIVITY_NAME_ATTR + "\n            " + PIP_ATTRS, 1)
+    # без <queries> Android 11+ ховає сторонні плеєри (VLC, MX…) від застосунку
+    if manifest.count("<application") != 1:
+        sys.exit("Не знайдено єдиного <application> в AndroidManifest.xml — шаблон змінився")
+    manifest = manifest.replace("<application", PLAYER_QUERIES + "\n    <application", 1)
     if APP_ICON_ATTR not in manifest:
         sys.exit("Не знайдено android:icon у <application> — шаблон змінився")
     manifest = manifest.replace(

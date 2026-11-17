@@ -442,9 +442,10 @@ def main(page: ft.Page, reopen=None):
                 # "off" — програмне (якщо на телевізорі картинка тремтить / відстає від звуку)
                 "hwdec": "auto",
                 "abroad": True,  # обхід регіональних обмежень — плеєр через Tor (tor_runner.py)
-                # Android / TV: "ask" — запитати при першому перегляді, "builtin" — свій плеєр,
-                # "external" — інша програма (VLC, MX Player…)
+                # Android / TV: "ask" — запитувати щоразу (вибір не запам'ятовується),
+                # "builtin" — свій плеєр, "external" — інша програма (player_pkg — її пакет)
                 "player": "ask",
+                "player_pkg": "",
                 "app_icon": "classic"}  # іконка застосунку (appicon.py)
 
     # Історія переглядів: [{url, title, orig, poster, age, season, label, si, ei, voice,
@@ -3473,7 +3474,7 @@ def main(page: ft.Page, reopen=None):
                                ("auto_fullscreen", True), ("volume_boost", "6"),
                                ("auto_updates", True),
                                ("keep_history", True), ("skipped_version", ""),
-                               ("card_meta", True), ("hwdec", "auto"), ("player", "ask"),
+                               ("card_meta", True), ("hwdec", "auto"), ("player", "ask"), ("player_pkg", ""),
                                ("abroad", True)):
                 save_setting(key, value)
             for key, value in appearance.DEFAULTS.items():
@@ -3506,6 +3507,15 @@ def main(page: ft.Page, reopen=None):
                 row(ft.Icons.CLOUD_OFF_ROUNDED, "Вимкнути на цьому пристрої",
                     "Історія на цьому пристрої залишиться", on_click=lambda e: sync_disable()),
             ]
+
+        def player_set():
+            if settings.get("player") != "external":
+                return
+
+            async def go():
+                await choose_external_player()
+                reopen_settings()
+            page.run_task(go)
 
         def reopen_settings():
             # лише якщо ця сторінка ще відкрита — швидкі повторні натискання інакше закривали
@@ -3644,7 +3654,7 @@ def main(page: ft.Page, reopen=None):
                 *([row(ft.Icons.SMART_DISPLAY_OUTLINED, "Плеєр",
                        "Інша програма: VLC, MX Player… (вибір під час запуску). Прогрес "
                        "перегляду тоді не запам'ятовується",
-                       trailing=choice("player", PLAYER_OPTIONS))]
+                       trailing=choice("player", PLAYER_OPTIONS, on_set=player_set))]
                   if is_android or TV else []),
                 row(ft.Icons.MEMORY_ROUNDED, "Декодування відео",
                     "Якщо картинка тремтить чи звук випереджає відео — спробуйте «Сумісне» "
@@ -4731,18 +4741,42 @@ def main(page: ft.Page, reopen=None):
         return row
 
     # ═════════════════════ плеєр ═════════════════════
-    async def ask_player():
-        """Android / TV, перший перегляд: яким плеєром дивитись. Вибір запам'ятовується;
-        змінити — Налаштування → Відтворення → Плеєр. → "builtin" / "external" / None."""
-        done = asyncio.get_running_loop().create_future()
+    def installed_players():
+        """Android / TV: усі встановлені відеоплеєри [{pkg, label, icon (base64)}]; список
+        і іконки готує MainActivity (cache/players.json, cache/players/<пакет>.png)."""
+        import base64
+        base = update_dir()
+        if not base:
+            return []
+        try:
+            with open(os.path.join(base, "players.json"), encoding="utf-8") as f:
+                items = json.load(f)
+        except Exception:
+            return []
+        out = []
+        for it in items:
+            icon = None
+            try:
+                with open(os.path.join(base, "players", it["pkg"] + ".png"), "rb") as f:
+                    icon = base64.b64encode(f.read()).decode()
+            except Exception:
+                pass
+            out.append({"pkg": it["pkg"], "label": it.get("label") or it["pkg"], "icon": icon})
+        out.sort(key=lambda x: x["label"].lower())
+        return out
 
-        def pick(value):
+    async def pick_player_dialog(include_builtin):
+        """Вікно зі списком плеєрів; нічого не запам'ятовує. → ("builtin", "") / ("external", пакет)
+        (порожній пакет — системний вибір) / None, якщо вікно закрили."""
+        done = asyncio.get_running_loop().create_future()
+        players = installed_players()
+
+        def pick(result):
             def handler(e):
                 quiet()
-                save_setting("player", value)
                 page.pop_dialog()
                 if not done.done():
-                    done.set_result(value)
+                    done.set_result(result)
             return handler
 
         def dismissed(e):
@@ -4750,25 +4784,50 @@ def main(page: ft.Page, reopen=None):
             if not done.done():
                 done.set_result(None)
 
+        def row(label, icon, result, autofocus=False):
+            lead = (ft.Image(src=icon, width=32, height=32, fit=ft.BoxFit.CONTAIN)
+                    if icon else ft.Icon(ft.Icons.PLAY_CIRCLE_OUTLINE_ROUNDED, size=32))
+            return ft.FilledButton(
+                content=ft.Row([lead, ft.Text(label, size=16, weight=ft.FontWeight.W_600,
+                                              max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                                              expand=True)], spacing=14),
+                width=dialog_width(), autofocus=autofocus, on_click=pick(result),
+                style=ft.ButtonStyle(
+                    bgcolor={ft.ControlState.FOCUSED: TV_FOCUS_BG, ft.ControlState.DEFAULT: SURFACE_2},
+                    side=TV_FOCUS_SIDE, color=TV_FOCUS_TEXT,
+                    padding=ft.Padding.symmetric(horizontal=16, vertical=12),
+                    shape=ft.RoundedRectangleBorder(radius=12)))
+
+        rows = []
+        if include_builtin:
+            rows.append(row("Вбудований (UAFix)", None, ("builtin", ""), autofocus=True))
+        for i, pl in enumerate(players):
+            rows.append(row(pl["label"], pl["icon"], ("external", pl["pkg"]),
+                            autofocus=not include_builtin and i == 0))
+        if not players:
+            rows.append(row("Вибрати в системі", None, ("external", ""),
+                            autofocus=not include_builtin))
         show_dialog(ft.AlertDialog(
-            title=ft.Text("Яким плеєром дивитись?", weight=ft.FontWeight.W_800),
-            bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18),
-            on_dismiss=dismissed,
-            content=ft.Column([
-                ft.Text("Вбудований — запам'ятовує, де ви зупинились, пропускає заставку, "
-                        "вмикає наступну серію. Інша програма — VLC, MX Player чи інший плеєр "
-                        "на пристрої.", size=14, color=TEXT, width=dialog_width()),
-                ft.Text("Вибір можна змінити: Налаштування → Відтворення → Плеєр.", size=13,
-                        color=MUTED, width=dialog_width()),
-            ], tight=True, spacing=12),
-            actions=[ft.TextButton("Інша програма", on_click=pick("external"),
-                                   style=ft.ButtonStyle(color=TEXT)),
-                     ft.FilledButton("Вбудований", on_click=pick("builtin"), autofocus=True,
-                                     style=ft.ButtonStyle(bgcolor=ACCENT, color="#FFFFFF"))],
+            title=ft.Text("Чим відкрити відео?" if include_builtin else "Яка програма?",
+                          weight=ft.FontWeight.W_800),
+            bgcolor=SURFACE_3, shape=ft.RoundedRectangleBorder(radius=18), on_dismiss=dismissed,
+            content=ft.Column(rows, tight=True, spacing=8, scroll=ft.ScrollMode.AUTO,
+                              width=dialog_width()),
+            actions=[ft.TextButton("Скасувати", on_click=pick(None),
+                                   style=ft.ButtonStyle(color=MUTED))],
         ))
         return await done
 
-    async def play_external(ctx, ep):
+    async def choose_external_player():
+        """Налаштування «Інша програма»: вибір плеєра запам'ятовується (player_pkg)."""
+        res = await pick_player_dialog(False)
+        if res is None:
+            if not settings.get("player_pkg"):  # нічого не обрано — повертаємо «Запитувати»
+                save_setting("player", "ask")
+        else:
+            save_setting("player_pkg", res[1])
+
+    async def play_external(ctx, ep, pkg=""):
         """Android / TV, «Плеєр: інша програма»: потік обраної якості — у VLC / MX Player…
         (вікно вибору програми показує MainActivity)"""
         entry = pick_source(ep, ctx.get("voice", ""))
@@ -4780,7 +4839,7 @@ def main(page: ft.Page, reopen=None):
         title = show + (f" · {ep['label']}" if len(ctx["seasons"]) > 1 or
                         len(ctx["seasons"][0]["episodes"]) > 1 else "")
         await ft.UrlLauncher().launch_url(
-            "uafixupdate://external?" + urlencode({"url": url, "title": title}),
+            "uafixupdate://external?" + urlencode({"url": url, "title": title, "pkg": pkg}),
             mode=ft.LaunchMode.EXTERNAL_APPLICATION)
 
     async def play_episode(ctx, si, ei, start_ms=None):
@@ -4806,12 +4865,23 @@ def main(page: ft.Page, reopen=None):
             await detect_voices(ctx)
         if is_android or TV:
             mode = settings.get("player") or "ask"
-            if mode == "ask":
-                mode = await ask_player()
-                if mode is None:
+            if mode == "ask":  # щоразу — вибір не запам'ятовується
+                res = await pick_player_dialog(True)
+                if res is None:
                     return  # вікно закрили — нічого не запускаємо
-            if mode == "external":
-                await play_external(ctx, ep)
+                if res[0] == "external":
+                    await play_external(ctx, ep, res[1])
+                    return
+            elif mode == "external":
+                pkg = settings.get("player_pkg") or ""
+                known = {x["pkg"] for x in installed_players()}
+                if pkg and known and pkg not in known:  # обрану програму видалили — обираємо знову
+                    res = await pick_player_dialog(False)
+                    if res is None:
+                        return
+                    pkg = res[1]
+                    save_setting("player_pkg", pkg)
+                await play_external(ctx, ep, pkg)
                 return
         multi = len(ctx["seasons"]) > 1
         # усі серії по порядку; черга — з обраної й далі, «before» — попередні
